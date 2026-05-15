@@ -59,13 +59,13 @@ main() {
   bootstrap_install
   sync_repo
 
-  if [[ ! -x "${APP_DIR}/scripts/pi-sync.sh" ]]; then
+  if [[ ! -f "${APP_DIR}/scripts/pi-sync.sh" ]]; then
     echo "Latest sync script not found at ${APP_DIR}/scripts/pi-sync.sh" >&2
     exit 1
   fi
 
   log "Running latest checked-out sync script"
-  exec "${APP_DIR}/scripts/pi-sync.sh"
+  exec bash "${APP_DIR}/scripts/pi-sync.sh" "$@"
 }
 
 main "$@"

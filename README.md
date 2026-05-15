@@ -76,7 +76,7 @@ Recommended base image:
 
 Deployment is split into two scripts:
 
-- `scripts/pi-setup.sh` is the small bootstrap entrypoint. It installs the minimum packages, syncs the requested Git branch, then runs the checked-out latest `pi-sync.sh`.
+- `scripts/pi-setup.sh` is the small bootstrap entrypoint. It installs the minimum packages, syncs the requested Git branch, then runs the checked-out latest `pi-sync.sh` with the original arguments and environment preserved.
 - `scripts/pi-sync.sh` is the full idempotent install/update worker. It will:
 
 - install required apt packages, including the native Hailo post-process build dependencies,
