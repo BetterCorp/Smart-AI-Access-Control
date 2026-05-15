@@ -37,6 +37,8 @@ apt_install() {
     ca-certificates
     curl
     git
+    nodejs
+    npm
     python3-pip
     python3-venv
     ufw
@@ -133,13 +135,9 @@ print("Hailo Python bindings available")
 PY
 }
 
-install_node_assets_if_available() {
-  if ! command -v npm >/dev/null 2>&1; then
-    log "npm not found; using committed static assets"
-    return
-  fi
-
+install_node_assets() {
   log "Building TypeScript assets"
+  require_command npm
   npm --prefix "${APP_DIR}" ci
   npm --prefix "${APP_DIR}" run build
   rm -rf "${APP_DIR}/node_modules"
@@ -200,7 +198,7 @@ main() {
   sync_repo
   install_python_app
   verify_hailo_python
-  install_node_assets_if_available
+  install_node_assets
   install_udev
   install_systemd
   configure_firewall

@@ -33,6 +33,8 @@ Examples:
 
 ```powershell
 python -m pip install -e .[dev]
+npm ci
+npm run build
 python -m pytest
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -79,7 +81,7 @@ The installer is idempotent. Run the same command for a fresh install or to upda
 - create `/var/lib/smartai` for the SQLite DB and snapshots,
 - clone or update the repo at `/opt/smart-ai-access-control`,
 - create/update the Python virtual environment,
-- build TypeScript assets if `npm` is available,
+- install Node.js/npm and build TypeScript assets from source,
 - install systemd services,
 - install the USB relay udev rule,
 - expose the app directly on `0.0.0.0:8000`,
@@ -156,6 +158,8 @@ Health separates relay software enablement from relay visibility:
 
 - `Relay control enabled` reflects `SMARTAI_ENABLE_RELAY_HARDWARE`.
 - `Relay channels visible` is how many channels the worker can see through the `usbrelay` command.
+
+Frontend build output under `backend/app/static/dist/` is generated during local setup and Pi deployment; it is not committed to the repository.
 
 ## License
 
