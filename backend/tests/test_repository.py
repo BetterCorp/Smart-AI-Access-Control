@@ -1,5 +1,7 @@
 from backend.app.db import Database, Repository
-from backend.app.domain import CameraConfig, ConditionGroup, MonitorConfig, RelayAction, RelayDesiredState, RuleCondition, RuleConfig
+from datetime import datetime, timezone
+
+from backend.app.domain import CameraConfig, ConditionGroup, MonitorConfig, Observation, RelayAction, RelayDesiredState, RuleCondition, RuleConfig
 
 
 def test_repository_persists_camera_and_rule_with_actions(tmp_path) -> None:
@@ -53,3 +55,26 @@ def test_repository_updates_monitor_in_place(tmp_path) -> None:
         "cam-2",
         config={"class_name": "weapon", "confidence_threshold": 0.7},
     )
+
+
+def test_live_signatures_change_when_monitor_output_changes(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    before = repo.live_signatures()
+
+    repo.record_observation(
+        Observation(
+            "core.object_count",
+            "cam-1",
+            "person.count",
+            2,
+            timestamp=datetime(2026, 5, 15, tzinfo=timezone.utc),
+            monitor_id="mon-1",
+            model_id="person_counter",
+        )
+    )
+    after = repo.live_signatures()
+
+    assert before["monitor_outputs"] != after["monitor_outputs"]
+    assert before["health"] != after["health"]

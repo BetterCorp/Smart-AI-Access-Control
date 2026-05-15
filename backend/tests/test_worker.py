@@ -1,5 +1,5 @@
 from backend.app.db import Database, Repository
-from backend.app.domain import CameraConfig, ConditionGroup, MonitorConfig, RelayAction, RelayDesiredState, RuleCondition, RuleConfig
+from backend.app.domain import CameraConfig, ConditionGroup, InferenceResult, MonitorConfig, Observation, RelayAction, RelayDesiredState, RuleCondition, RuleConfig
 from backend.app.storage.snapshots import SnapshotStore, StorageConfig
 from backend.app.worker import MockInferenceProvider, Worker
 
@@ -101,3 +101,38 @@ def test_worker_evaluates_boolean_weapon_monitor(tmp_path) -> None:
     with db.connect() as conn:
         row = conn.execute("SELECT current_state FROM relay_channels WHERE id = 'relay-1'").fetchone()
     assert row["current_state"] == "on"
+
+
+class DebugInferenceProvider:
+    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
+        return InferenceResult(
+            [
+                Observation(
+                    "core.object_count",
+                    camera.id,
+                    "person.count",
+                    2,
+                    monitor_id=monitor.id,
+                    model_id=monitor.model_id,
+                )
+            ],
+            debug_jpeg=b"debug-jpeg",
+        )
+
+
+def test_worker_stores_monitor_debug_snapshot(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    repo.save_camera(camera)
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        DebugInferenceProvider(),
+    )
+
+    worker.process_once()
+
+    rows = repo.list_monitor_debug_snapshots()
+    assert len(rows) == 1
+    assert rows[0]["monitor_id"] == "mon-1"
