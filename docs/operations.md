@@ -4,6 +4,12 @@
 
 Use Raspberry Pi OS Lite 64-bit on Raspberry Pi 5.
 
+The API service binds to `0.0.0.0:8000` on the Pi. Access it from the LAN at:
+
+```text
+http://<pi-ip>:8000
+```
+
 ## Hailo Verification
 
 ```bash

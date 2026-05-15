@@ -61,7 +61,7 @@ The installer is idempotent. Run the same command for a fresh install or to upda
 - build TypeScript assets if `npm` is available,
 - install systemd services,
 - install the USB relay udev rule,
-- configure Caddy as a reverse proxy,
+- expose the app directly on `0.0.0.0:8000`,
 - optionally configure UFW,
 - restart services,
 - verify `http://127.0.0.1:8000/healthz`.
@@ -95,7 +95,6 @@ Useful installer overrides:
 
 ```bash
 sudo env \
-  SMARTAI_DOMAIN=smartai.local \
   SMARTAI_BRANCH=main \
   SMARTAI_MOCK_INFERENCE=1 \
   SMARTAI_ENABLE_RELAY_HARDWARE=0 \
@@ -111,10 +110,10 @@ systemctl status smartai-api smartai-worker
 curl http://127.0.0.1:8000/healthz
 ```
 
-Open:
+Open from another machine on the LAN:
 
 ```text
-https://smartai.local/bootstrap
+http://<pi-ip>:8000/bootstrap
 ```
 
 Use `/bootstrap` once to create the single admin password.

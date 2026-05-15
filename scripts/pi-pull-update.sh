@@ -28,7 +28,6 @@ fi
 
 systemctl daemon-reload
 systemctl restart smartai-api.service smartai-worker.service
-systemctl reload caddy || systemctl restart caddy
 
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8000/healthz >/dev/null
 echo "Smart AI Access Control updated and healthy."

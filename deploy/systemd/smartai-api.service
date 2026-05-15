@@ -11,7 +11,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=SMARTAI_DATA_DIR=/var/lib/smartai
 Environment=SMARTAI_DB=/var/lib/smartai/smartai.db
 Environment=SMARTAI_SNAPSHOT_ROOT=/var/lib/smartai/snapshots
-ExecStart=/opt/smart-ai-access-control/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/smart-ai-access-control/.venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

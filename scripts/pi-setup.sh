@@ -5,7 +5,6 @@ REPO_URL="${SMARTAI_REPO_URL:-https://github.com/BetterCorp/Smart-AI-Access-Cont
 BRANCH="${SMARTAI_BRANCH:-main}"
 APP_DIR="${SMARTAI_APP_DIR:-/opt/smart-ai-access-control}"
 DATA_DIR="${SMARTAI_DATA_DIR:-/var/lib/smartai}"
-DOMAIN="${SMARTAI_DOMAIN:-smartai.local}"
 MOCK_INFERENCE="${SMARTAI_MOCK_INFERENCE:-1}"
 ENABLE_RELAY_HARDWARE="${SMARTAI_ENABLE_RELAY_HARDWARE:-0}"
 ENABLE_HAILO_PACKAGES="${SMARTAI_ENABLE_HAILO_PACKAGES:-1}"
@@ -35,7 +34,6 @@ require_command() {
 apt_install() {
   local packages=(
     ca-certificates
-    caddy
     curl
     git
     python3-pip
@@ -123,17 +121,6 @@ EOF
   systemctl restart smartai-api.service smartai-worker.service
 }
 
-install_caddy() {
-  log "Installing Caddy reverse proxy"
-  cat >/etc/caddy/Caddyfile <<EOF
-${DOMAIN} {
-  reverse_proxy 127.0.0.1:8000
-}
-EOF
-  systemctl enable caddy
-  systemctl reload caddy || systemctl restart caddy
-}
-
 install_udev() {
   log "Installing USB relay udev rule"
   install -m 0644 "${APP_DIR}/deploy/udev/99-usbrelay.rules" /etc/udev/rules.d/99-usbrelay.rules
@@ -148,8 +135,7 @@ configure_firewall() {
 
   log "Configuring firewall"
   ufw allow OpenSSH
-  ufw allow 80/tcp
-  ufw allow 443/tcp
+  ufw allow 8000/tcp
   ufw --force enable
 }
 
@@ -175,14 +161,13 @@ main() {
   install_node_assets_if_available
   install_udev
   install_systemd
-  install_caddy
   configure_firewall
   verify_install
 
   log "Setup complete"
-  echo "Open: https://${DOMAIN}"
-  echo "First-run admin setup: https://${DOMAIN}/bootstrap"
-  echo "Local fallback: http://127.0.0.1:8000"
+  echo "Open: http://<pi-ip>:8000"
+  echo "First-run admin setup: http://<pi-ip>:8000/bootstrap"
+  echo "Local health check: http://127.0.0.1:8000/healthz"
 }
 
 main "$@"
