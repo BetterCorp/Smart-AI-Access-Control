@@ -98,8 +98,11 @@ sync_repo() {
 install_python_app() {
   log "Installing Python application"
   if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
-    if [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+    if [[ -x "${APP_DIR}/.venv/bin/python" ]] && grep -qx "include-system-site-packages = true" "${APP_DIR}/.venv/pyvenv.cfg"; then
       python3 -m venv --upgrade --system-site-packages "${APP_DIR}/.venv"
+    elif [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+      log "Rebuilding virtualenv with system site packages enabled"
+      python3 -m venv --clear --system-site-packages "${APP_DIR}/.venv"
     else
       python3 -m venv --system-site-packages "${APP_DIR}/.venv"
     fi

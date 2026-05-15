@@ -154,6 +154,8 @@ After switching to real inference, the Cameras page shows the last stream/provid
 
 The setup script verifies the worker virtualenv can import `gi`, `hailo`, and `hailo_apps` before it restarts services. If that verification fails, setup stops with the missing binding instead of leaving the worker in a hidden half-configured state.
 
+For an existing install created before Hailo support was wired in, rerunning setup repairs an isolated virtualenv by rebuilding it with system packages enabled.
+
 Health separates relay software enablement from relay visibility:
 
 - `Relay control enabled` reflects `SMARTAI_ENABLE_RELAY_HARDWARE`.
