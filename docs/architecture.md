@@ -10,6 +10,29 @@ The inference scheduler is intentionally latest-frame based. Cameras can push 25
 
 Relay output is arbitrated by rule priority. Equal-priority conflicts are invalid because a safety appliance must not hide ambiguous output state.
 
+## Rule Engine Model
+
+Rules do not run AI directly. The flow is:
+
+```text
+Camera -> AI Monitor -> typed metrics -> Rule -> Outputs
+```
+
+An AI monitor represents a monitoring function such as `Person Counter` or `Weapon Visibility`. Each monitor is attached to one camera and publishes named metrics:
+
+- `person.count`: number
+- `person.present`: boolean
+- `weapon.visible`: boolean
+- `weapon.count`: number
+
+Rules bind to one monitor and contain a condition group. The rule engine evaluates the monitor's latest observations with type-appropriate operators:
+
+- numeric/string: `==`, `!=`, `>`, `>=`, `<`, `<=`
+- boolean: `is_true`, `is_false`
+- presence: `exists`
+
+Actions are separate from conditions. Relay output, webhooks, snapshots, debounce, cooldown, and fail policy are rule-output concerns, not AI model concerns.
+
 ## Inference Boundary
 
 Development uses `MockInferenceProvider`, which produces deterministic person counts for tests and local runs.

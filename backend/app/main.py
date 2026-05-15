@@ -14,7 +14,9 @@ from backend.app.config import load_settings
 from backend.app.db import Database, Repository
 from backend.app.domain import (
     CameraConfig,
+    ConditionGroup,
     FailPolicy,
+    MonitorConfig,
     RelayAction,
     RelayDesiredState,
     RuleCondition,
@@ -22,6 +24,7 @@ from backend.app.domain import (
     SnapshotDelivery,
     WebhookAction,
 )
+from backend.app.models import MODEL_DEFINITIONS, model_options
 from backend.app.plugins.object_count import ObjectCountPlugin
 
 
@@ -112,6 +115,7 @@ def dashboard(request: Request) -> HTMLResponse:
         "pages/dashboard.html",
         {
             "camera_count": len(cameras),
+            "monitor_count": len(repo.list_monitors()),
             "rule_count": len(rules),
             "relay_count": len(relays),
             "event_count": len(events),
@@ -119,6 +123,66 @@ def dashboard(request: Request) -> HTMLResponse:
             "events": events,
         },
     )
+
+
+@app.get("/monitors", response_class=HTMLResponse)
+def monitors_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "pages/monitors.html",
+        {
+            "monitors": repo.list_monitors(),
+            "cameras": repo.list_cameras(),
+            "models": model_options(),
+            "monitor_states": repo.list_monitor_states(),
+        },
+    )
+
+
+@app.get("/ui/monitors/table", response_class=HTMLResponse)
+def monitors_table(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "partials/monitors_table.html",
+        {
+            "monitors": repo.list_monitors(),
+            "monitor_states": repo.list_monitor_states(),
+        },
+    )
+
+
+@app.post("/ui/monitors", response_class=HTMLResponse)
+def create_monitor(
+    request: Request,
+    name: str = Form(...),
+    model_id: str = Form(...),
+    camera_id: str = Form(...),
+    class_name: str = Form("person"),
+    confidence_threshold: float = Form(0.5),
+) -> Response:
+    if model_id not in MODEL_DEFINITIONS:
+        raise HTTPException(status_code=400, detail="unknown model")
+    if repo.get_camera(camera_id) is None:
+        raise HTTPException(status_code=400, detail="unknown camera")
+    monitor = MonitorConfig(
+        id=new_id("mon"),
+        name=name,
+        model_id=model_id,
+        camera_id=camera_id,
+        config={"class_name": class_name, "confidence_threshold": confidence_threshold},
+    )
+    repo.save_monitor(monitor)
+    if wants_fragment(request):
+        return monitors_table(request)
+    return RedirectResponse("/monitors", status_code=303)
+
+
+@app.post("/ui/monitors/{monitor_id}/delete", response_class=HTMLResponse)
+def delete_monitor(request: Request, monitor_id: str) -> Response:
+    repo.delete_monitor(monitor_id)
+    if wants_fragment(request):
+        return monitors_table(request)
+    return RedirectResponse("/monitors", status_code=303)
 
 
 @app.get("/cameras", response_class=HTMLResponse)
@@ -188,7 +252,7 @@ def rules_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "pages/rules.html",
-        {"rules": repo.list_rules(), "cameras": repo.list_cameras(), "relays": repo.list_relays()},
+        {"rules": repo.list_rules(), "monitors": repo.list_monitors(), "models": MODEL_DEFINITIONS, "relays": repo.list_relays()},
     )
 
 
@@ -201,10 +265,10 @@ def rules_table(request: Request) -> HTMLResponse:
 def create_rule(
     request: Request,
     name: str = Form(...),
-    camera_id: str = Form(...),
+    monitor_id: str = Form(...),
     metric: str = Form("person.count"),
     operator: str = Form(">="),
-    value: int = Form(2),
+    value: str = Form("2"),
     true_relay_id: str = Form(""),
     true_relay_state: RelayDesiredState = Form(RelayDesiredState.ON),
     false_relay_id: str = Form(""),
@@ -216,8 +280,8 @@ def create_rule(
     cooldown_ms: int = Form(1000),
     fail_policy: FailPolicy = Form(FailPolicy.GLOBAL),
 ) -> Response:
-    if repo.get_camera(camera_id) is None:
-        raise HTTPException(status_code=400, detail="unknown camera")
+    if repo.get_monitor(monitor_id) is None:
+        raise HTTPException(status_code=400, detail="unknown monitor")
 
     true_actions = []
     false_actions = []
@@ -238,9 +302,8 @@ def create_rule(
         name=name,
         enabled=True,
         priority=100,
-        camera_ids=[camera_id],
-        plugin_id="core.object_count",
-        condition=RuleCondition(metric=metric, operator=operator, value=value),
+        monitor_id=monitor_id,
+        condition_group=ConditionGroup(mode="all", conditions=[RuleCondition(metric=metric, operator=operator, value=parse_condition_value(value))]),
         true_actions=true_actions,
         false_actions=false_actions,
         fault_actions=fault_actions,
@@ -331,6 +394,7 @@ def health() -> dict[str, object]:
     return {
         "ok": True,
         "cameras": len(repo.list_cameras()),
+        "monitors": len(repo.list_monitors()),
         "rules": len(repo.list_rules()),
         "relays": len(repo.list_relays()),
         "events": len(repo.list_events(limit=1000)),
@@ -349,3 +413,19 @@ def healthz() -> dict[str, object]:
 @app.get("/ui/system/health", response_class=HTMLResponse)
 def health_panel(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "partials/health.html", {"health": health()})
+
+
+def parse_condition_value(raw: str) -> int | float | bool | str:
+    normalized = raw.strip()
+    if normalized.lower() == "true":
+        return True
+    if normalized.lower() == "false":
+        return False
+    try:
+        return int(normalized)
+    except ValueError:
+        pass
+    try:
+        return float(normalized)
+    except ValueError:
+        return normalized

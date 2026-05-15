@@ -15,7 +15,10 @@ from typing import Any, Iterator
 from backend.app.domain import (
     Action,
     CameraConfig,
+    ConditionGroup,
     FailPolicy,
+    MonitorConfig,
+    Observation,
     RelayAction,
     RelayDesiredState,
     RuleCondition,
@@ -105,13 +108,36 @@ class Database:
                   updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS monitors (
+                  id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  model_id TEXT NOT NULL,
+                  camera_id TEXT NOT NULL,
+                  enabled INTEGER NOT NULL,
+                  config_json TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS monitor_states (
+                  monitor_id TEXT NOT NULL,
+                  metric TEXT NOT NULL,
+                  value TEXT NOT NULL,
+                  value_json TEXT NOT NULL,
+                  observed_at TEXT NOT NULL,
+                  labels_json TEXT NOT NULL,
+                  PRIMARY KEY (monitor_id, metric)
+                );
+
                 CREATE TABLE IF NOT EXISTS rules (
                   id TEXT PRIMARY KEY,
                   name TEXT NOT NULL,
                   enabled INTEGER NOT NULL,
                   priority INTEGER NOT NULL,
+                  monitor_id TEXT,
                   camera_ids_json TEXT NOT NULL,
                   plugin_id TEXT NOT NULL,
+                  condition_group_json TEXT,
                   condition_json TEXT NOT NULL,
                   true_actions_json TEXT NOT NULL,
                   false_actions_json TEXT NOT NULL,
@@ -147,6 +173,8 @@ class Database:
                 );
                 """
             )
+            self._add_column(conn, "rules", "monitor_id", "TEXT")
+            self._add_column(conn, "rules", "condition_group_json", "TEXT")
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -154,6 +182,11 @@ class Database:
             conn.commit()
         self.ensure_default_relays()
         self.ensure_default_settings()
+
+    def _add_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def ensure_default_relays(self) -> None:
         with self.connect() as conn:
@@ -289,6 +322,84 @@ class Repository:
         with self.db.connect() as conn:
             conn.execute("DELETE FROM cameras WHERE id = ?", (camera_id,))
 
+    def list_monitors(self) -> list[MonitorConfig]:
+        with self.db.connect() as conn:
+            rows = conn.execute("SELECT * FROM monitors ORDER BY name").fetchall()
+        return [monitor_from_row(row) for row in rows]
+
+    def get_monitor(self, monitor_id: str) -> MonitorConfig | None:
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT * FROM monitors WHERE id = ?", (monitor_id,)).fetchone()
+        return monitor_from_row(row) if row else None
+
+    def save_monitor(self, monitor: MonitorConfig) -> None:
+        now = utc_iso()
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO monitors
+                  (id, name, model_id, camera_id, enabled, config_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  name = excluded.name,
+                  model_id = excluded.model_id,
+                  camera_id = excluded.camera_id,
+                  enabled = excluded.enabled,
+                  config_json = excluded.config_json,
+                  updated_at = excluded.updated_at
+                """,
+                (
+                    monitor.id,
+                    monitor.name,
+                    monitor.model_id,
+                    monitor.camera_id,
+                    1 if monitor.enabled else 0,
+                    json.dumps(monitor.config),
+                    now,
+                    now,
+                ),
+            )
+
+    def delete_monitor(self, monitor_id: str) -> None:
+        with self.db.connect() as conn:
+            conn.execute("DELETE FROM monitors WHERE id = ?", (monitor_id,))
+
+    def record_observation(self, observation: Observation) -> None:
+        if observation.monitor_id is None:
+            return
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO monitor_states
+                  (monitor_id, metric, value, value_json, observed_at, labels_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(monitor_id, metric) DO UPDATE SET
+                  value = excluded.value,
+                  value_json = excluded.value_json,
+                  observed_at = excluded.observed_at,
+                  labels_json = excluded.labels_json
+                """,
+                (
+                    observation.monitor_id,
+                    observation.metric,
+                    str(observation.value),
+                    json.dumps(observation.value),
+                    observation.timestamp.isoformat(),
+                    json.dumps(observation.labels),
+                ),
+            )
+
+    def list_monitor_states(self) -> list[sqlite3.Row]:
+        with self.db.connect() as conn:
+            return conn.execute(
+                """
+                SELECT monitors.name AS monitor_name, monitors.model_id, monitor_states.*
+                FROM monitor_states
+                JOIN monitors ON monitors.id = monitor_states.monitor_id
+                ORDER BY monitor_states.observed_at DESC, monitors.name, monitor_states.metric
+                """
+            ).fetchall()
+
     def set_camera_health(self, camera_id: str, health: str, last_error: str | None = None) -> None:
         with self.db.connect() as conn:
             conn.execute(
@@ -326,20 +437,23 @@ class Repository:
     def save_rule(self, rule: RuleConfig) -> None:
         now = utc_iso()
         condition = asdict(rule.condition)
+        condition_group = asdict(rule.condition_group)
         with self.db.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO rules
-                  (id, name, enabled, priority, camera_ids_json, plugin_id, condition_json,
+                  (id, name, enabled, priority, monitor_id, camera_ids_json, plugin_id, condition_group_json, condition_json,
                    true_actions_json, false_actions_json, fault_actions_json,
                    debounce_true_ms, debounce_false_ms, cooldown_ms, fail_policy, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   name = excluded.name,
                   enabled = excluded.enabled,
                   priority = excluded.priority,
+                  monitor_id = excluded.monitor_id,
                   camera_ids_json = excluded.camera_ids_json,
                   plugin_id = excluded.plugin_id,
+                  condition_group_json = excluded.condition_group_json,
                   condition_json = excluded.condition_json,
                   true_actions_json = excluded.true_actions_json,
                   false_actions_json = excluded.false_actions_json,
@@ -355,8 +469,10 @@ class Repository:
                     rule.name,
                     1 if rule.enabled else 0,
                     rule.priority,
+                    rule.monitor_id,
                     json.dumps(rule.camera_ids),
                     rule.plugin_id,
+                    json.dumps(condition_group),
                     json.dumps(condition),
                     json.dumps([action_to_json(action) for action in rule.true_actions]),
                     json.dumps([action_to_json(action) for action in rule.false_actions]),
@@ -505,16 +621,32 @@ def relay_from_row(row: sqlite3.Row) -> RelayChannelConfig:
     )
 
 
+def monitor_from_row(row: sqlite3.Row) -> MonitorConfig:
+    return MonitorConfig(
+        id=row["id"],
+        name=row["name"],
+        model_id=row["model_id"],
+        camera_id=row["camera_id"],
+        enabled=bool(row["enabled"]),
+        config=json.loads(row["config_json"]),
+    )
+
+
 def rule_from_row(row: sqlite3.Row) -> RuleConfig:
     condition_payload = json.loads(row["condition_json"])
+    group_payload = json.loads(row["condition_group_json"]) if row["condition_group_json"] else {
+        "mode": "all",
+        "conditions": [condition_payload],
+    }
+    conditions = [RuleCondition(**condition) for condition in group_payload["conditions"]]
+    monitor_id = row["monitor_id"] or first_monitor_id_from_legacy(row)
     return RuleConfig(
         id=row["id"],
         name=row["name"],
         enabled=bool(row["enabled"]),
         priority=int(row["priority"]),
-        camera_ids=list(json.loads(row["camera_ids_json"])),
-        plugin_id=row["plugin_id"],
-        condition=RuleCondition(**condition_payload),
+        monitor_id=monitor_id,
+        condition_group=ConditionGroup(mode=group_payload["mode"], conditions=conditions),
         true_actions=[action_from_json(item) for item in json.loads(row["true_actions_json"])],
         false_actions=[action_from_json(item) for item in json.loads(row["false_actions_json"])],
         fault_actions=[action_from_json(item) for item in json.loads(row["fault_actions_json"])],
@@ -523,6 +655,11 @@ def rule_from_row(row: sqlite3.Row) -> RuleConfig:
         cooldown_ms=int(row["cooldown_ms"]),
         fail_policy=FailPolicy(row["fail_policy"]),
     )
+
+
+def first_monitor_id_from_legacy(row: sqlite3.Row) -> str:
+    camera_ids = list(json.loads(row["camera_ids_json"]))
+    return camera_ids[0] if camera_ids else ""
 
 
 def action_to_json(action: Action) -> dict[str, object]:
@@ -561,4 +698,3 @@ def action_from_json(payload: dict[str, object]) -> Action:
             hmac_secret=str(payload["hmac_secret"]) if payload.get("hmac_secret") else None,
         )
     raise ValueError(f"unsupported action type: {payload['type']}")
-

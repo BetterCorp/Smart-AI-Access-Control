@@ -5,12 +5,28 @@ Headless Raspberry Pi 5 + AI HAT+ access-control appliance for low-FPS RTSP anal
 This first implementation is a working scaffold:
 
 - FastAPI + server-rendered HTML/HTMX web shell.
-- SQLite persistence for admin sessions, cameras, relays, rules, events, and settings.
+- SQLite persistence for admin sessions, cameras, AI monitors, relays, rules, events, and settings.
 - Dependency-light core domain services for rules, relays, storage, webhooks, and RTSP URL building.
-- Plugin-ready analytics shape with an initial object/person counting plugin.
+- Plugin-ready AI monitor shape with initial person counting and weapon visibility monitor definitions.
 - Worker loop with mockable inference, snapshot event creation, relay arbitration, and webhook dispatch.
 - Raspberry Pi deployment notes and verification scripts.
 - Focused tests for the safety-critical logic.
+
+## Rule Model
+
+The system separates camera input, AI interpretation, rules, and outputs:
+
+- Cameras define RTSP connection details.
+- AI Monitors run a model or analytic against one camera and publish typed metrics.
+- Rules evaluate conditions against one monitor's metrics.
+- Outputs perform relay changes, webhooks, snapshots, debounce, cooldown, and fail behavior.
+
+Examples:
+
+- `Person Counter` monitor publishes `person.count` as a number and `person.present` as a boolean.
+- `Weapon Visibility` monitor publishes `weapon.visible` as a boolean and `weapon.count` as a number.
+- A mantrap rule can evaluate `person.count >= 2`.
+- A weapon rule can evaluate `weapon.visible is true`.
 
 ## Local Development
 

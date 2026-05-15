@@ -1,0 +1,35 @@
+<section id="monitors-table" class="panel">
+  <h3>Configured AI Monitors</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Model</th><th>Camera</th><th>Config</th><th></th></tr></thead>
+    <tbody>
+      {% for monitor in monitors %}
+      <tr>
+        <td>{{ monitor.name }}</td>
+        <td>{{ monitor.model_id }}</td>
+        <td>{{ monitor.camera_id }}</td>
+        <td><code>{{ monitor.config }}</code></td>
+        <td><button hx-post="/ui/monitors/{{ monitor.id }}/delete" hx-target="#monitors-table" hx-swap="outerHTML">Delete</button></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">No monitors configured.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <h3>Latest AI Outputs</h3>
+  <table>
+    <thead><tr><th>Monitor</th><th>Metric</th><th>Value</th><th>Observed</th></tr></thead>
+    <tbody>
+      {% for state in monitor_states %}
+      <tr>
+        <td>{{ state.monitor_name }}</td>
+        <td>{{ state.metric }}</td>
+        <td>{{ state.value }}</td>
+        <td>{{ state.observed_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No AI outputs observed yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

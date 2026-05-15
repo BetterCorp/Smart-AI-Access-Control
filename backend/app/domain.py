@@ -37,6 +37,38 @@ class SnapshotDelivery(str, Enum):
     BASE64_JSON = "base64_json"
 
 
+class MetricValueType(str, Enum):
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    STRING = "string"
+
+
+@dataclass(frozen=True)
+class MetricDefinition:
+    key: str
+    name: str
+    value_type: MetricValueType
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class AIModelDefinition:
+    id: str
+    name: str
+    description: str
+    metrics: list[MetricDefinition]
+
+
+@dataclass(frozen=True)
+class MonitorConfig:
+    id: str
+    name: str
+    model_id: str
+    camera_id: str
+    enabled: bool = True
+    config: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(frozen=True)
 class CameraConfig:
     id: str
@@ -64,6 +96,8 @@ class Observation:
     metric: str
     value: int | float | bool | str
     timestamp: datetime = field(default_factory=utc_now)
+    monitor_id: str | None = None
+    model_id: str | None = None
     zone_id: str | None = None
     labels: dict[str, str] = field(default_factory=dict)
 
@@ -73,6 +107,12 @@ class RuleCondition:
     metric: str
     operator: str
     value: int | float | bool | str
+
+
+@dataclass(frozen=True)
+class ConditionGroup:
+    mode: str
+    conditions: list[RuleCondition]
 
 
 @dataclass(frozen=True)
@@ -100,9 +140,8 @@ class RuleConfig:
     name: str
     enabled: bool
     priority: int
-    camera_ids: list[str]
-    plugin_id: str
-    condition: RuleCondition
+    monitor_id: str
+    condition_group: ConditionGroup
     true_actions: list[Action] = field(default_factory=list)
     false_actions: list[Action] = field(default_factory=list)
     fault_actions: list[Action] = field(default_factory=list)
@@ -110,6 +149,18 @@ class RuleConfig:
     debounce_false_ms: int = 0
     cooldown_ms: int = 0
     fail_policy: FailPolicy = FailPolicy.GLOBAL
+
+    @property
+    def camera_ids(self) -> list[str]:
+        return []
+
+    @property
+    def plugin_id(self) -> str:
+        return ""
+
+    @property
+    def condition(self) -> RuleCondition:
+        return self.condition_group.conditions[0]
 
 
 @dataclass
@@ -129,4 +180,3 @@ class SnapshotRef:
     filename: str
     sha256: str
     bytes_len: int
-

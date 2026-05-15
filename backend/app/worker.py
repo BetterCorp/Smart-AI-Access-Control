@@ -15,6 +15,7 @@ from backend.app.domain import (
     Action,
     CameraConfig,
     Detection,
+    MonitorConfig,
     Observation,
     RelayAction,
     RelayDesiredState,
@@ -36,7 +37,7 @@ ONE_PIXEL_JPEG = bytes.fromhex(
 
 
 class InferenceProvider(Protocol):
-    def observations_for(self, camera: CameraConfig) -> list[Observation]:
+    def observations_for(self, monitor: MonitorConfig, camera: CameraConfig) -> list[Observation]:
         ...
 
 
@@ -44,17 +45,38 @@ class InferenceProvider(Protocol):
 class MockInferenceProvider:
     counts: dict[str, int]
 
-    def observations_for(self, camera: CameraConfig) -> list[Observation]:
-        count = self.counts.get(camera.id, 0)
-        detections = [
-            Detection("person", 0.9, (0.1 + index * 0.05, 0.1, 0.2, 0.5))
-            for index in range(max(0, count))
+    def observations_for(self, monitor: MonitorConfig, camera: CameraConfig) -> list[Observation]:
+        if monitor.model_id == "weapon_visibility":
+            visible = bool(self.counts.get(monitor.id, self.counts.get(camera.id, 0)))
+            count = 1 if visible else 0
+            return [
+                Observation("core.weapon_visibility", camera.id, "weapon.visible", visible, monitor_id=monitor.id, model_id=monitor.model_id),
+                Observation("core.weapon_visibility", camera.id, "weapon.count", count, monitor_id=monitor.id, model_id=monitor.model_id),
+            ]
+
+        count = self.counts.get(monitor.id, self.counts.get(camera.id, 0))
+        class_name = str(monitor.config.get("class_name", "person"))
+        confidence = float(monitor.config.get("confidence_threshold", 0.5))
+        detections = [Detection(class_name, 0.9, (0.1 + index * 0.05, 0.1, 0.2, 0.5)) for index in range(max(0, count))]
+        observations = ObjectCountPlugin().on_detections(camera, detections, ObjectCountConfig(class_name, confidence))
+        return [
+            Observation(
+                observation.plugin_id,
+                observation.camera_id,
+                observation.metric,
+                observation.value,
+                timestamp=observation.timestamp,
+                monitor_id=monitor.id,
+                model_id=monitor.model_id,
+                zone_id=observation.zone_id,
+                labels=observation.labels,
+            )
+            for observation in observations
         ]
-        return ObjectCountPlugin().on_detections(camera, detections, ObjectCountConfig("person", 0.5))
 
 
 class HailoGStreamerProvider:
-    def observations_for(self, camera: CameraConfig) -> list[Observation]:
+    def observations_for(self, monitor: MonitorConfig, camera: CameraConfig) -> list[Observation]:
         raise RuntimeError(
             "Hailo provider is not wired in this environment. Set SMARTAI_MOCK_INFERENCE=1 or implement the Pi GStreamer adapter."
         )
@@ -84,22 +106,27 @@ class Worker:
     def process_once(self) -> None:
         cameras = self.repo.list_cameras()
         camera_by_id = {camera.id: camera for camera in cameras}
-        observations_by_camera: dict[str, list[Observation]] = {}
+        observations_by_monitor: dict[str, list[Observation]] = {}
 
-        for camera in cameras:
+        for monitor in self.repo.list_monitors():
+            camera = camera_by_id.get(monitor.camera_id)
+            if camera is None or not monitor.enabled:
+                observations_by_monitor[monitor.id] = []
+                continue
             try:
-                observations_by_camera[camera.id] = self.inference.observations_for(camera)
+                observations = self.inference.observations_for(monitor, camera)
+                observations_by_monitor[monitor.id] = observations
+                for observation in observations:
+                    self.repo.record_observation(observation)
                 self.repo.set_camera_health(camera.id, "online")
             except Exception as exc:
-                observations_by_camera[camera.id] = []
+                observations_by_monitor[monitor.id] = []
                 self.repo.set_camera_health(camera.id, "stream_error", str(exc))
 
         relay_commands: list[RelayCommand] = []
         for rule in self.repo.list_rules():
-            observations = []
-            for camera_id in rule.camera_ids:
-                observations.extend(observations_by_camera.get(camera_id, []))
-            faulted = any(camera_id not in observations_by_camera or not observations_by_camera[camera_id] for camera_id in rule.camera_ids)
+            observations = observations_by_monitor.get(rule.monitor_id, [])
+            faulted = rule.monitor_id not in observations_by_monitor or not observations
             evaluation = self.rule_engine.evaluate(rule, observations, datetime.now(timezone.utc), faulted=faulted)
             event_actions = evaluation.actions
 
@@ -240,6 +267,8 @@ def snapshot_ref_from_event(event) -> object:
 def observation_to_json(observation: Observation) -> dict[str, object]:
     return {
         "pluginId": observation.plugin_id,
+        "modelId": observation.model_id,
+        "monitorId": observation.monitor_id,
         "cameraId": observation.camera_id,
         "metric": observation.metric,
         "value": observation.value,
@@ -294,4 +323,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

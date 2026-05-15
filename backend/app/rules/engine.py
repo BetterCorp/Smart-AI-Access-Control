@@ -6,6 +6,7 @@ from typing import Iterable
 
 from backend.app.domain import (
     Action,
+    ConditionGroup,
     Observation,
     RuleCondition,
     RuleConfig,
@@ -30,6 +31,12 @@ def condition_matches(condition: RuleCondition, observation: Observation) -> boo
     left = observation.value
     right = condition.value
 
+    if condition.operator == "is_true":
+        return left is True
+    if condition.operator == "is_false":
+        return left is False
+    if condition.operator == "exists":
+        return left is not None
     if condition.operator == "==":
         return left == right
     if condition.operator == "!=":
@@ -46,6 +53,24 @@ def condition_matches(condition: RuleCondition, observation: Observation) -> boo
         return left <= right
 
     raise ValueError(f"unsupported rule operator: {condition.operator}")
+
+
+def condition_group_matches(condition_group: ConditionGroup, observations: Iterable[Observation]) -> tuple[bool, Observation | None]:
+    observations_list = list(observations)
+    matches: list[tuple[bool, Observation | None]] = []
+    for condition in condition_group.conditions:
+        matching_observation = next((item for item in observations_list if item.metric == condition.metric), None)
+        if matching_observation is None:
+            matches.append((False, None))
+            continue
+        matches.append((condition_matches(condition, matching_observation), matching_observation))
+
+    matched_observation = next((observation for matched, observation in matches if observation is not None), None)
+    if condition_group.mode == "any":
+        return any(matched for matched, _ in matches), matched_observation
+    if condition_group.mode == "all":
+        return all(matched for matched, _ in matches), matched_observation
+    raise ValueError(f"unsupported condition group mode: {condition_group.mode}")
 
 
 class RuleEngine:
@@ -75,17 +100,12 @@ class RuleEngine:
             actions = self._transition_actions(rule, previous_state, runtime.state, now, rule.fault_actions)
             return RuleEvaluation(rule.id, previous_state, runtime.state, actions, None)
 
-        matched = None
-        is_true = False
-        for observation in observations:
-            if observation.camera_id not in rule.camera_ids:
-                continue
-            if condition_matches(rule.condition, observation):
-                matched = observation
-                is_true = True
-                break
-            if observation.metric == rule.condition.metric:
-                matched = observation
+        scoped_observations = [
+            observation
+            for observation in observations
+            if observation.monitor_id == rule.monitor_id or observation.monitor_id is None
+        ]
+        is_true, matched = condition_group_matches(rule.condition_group, scoped_observations)
 
         target = RuleState.TRUE if is_true else RuleState.FALSE
         debounce_ms = rule.debounce_true_ms if is_true else rule.debounce_false_ms
@@ -151,4 +171,3 @@ class RuleEngine:
         runtime.last_transition_at = now
         runtime.last_actions_at = now
         return list(actions)
-
