@@ -95,6 +95,7 @@ Deployment is split into two scripts:
 - install the official `hailo-apps` Python package used by the real person-counting provider when Hailo support is enabled.
 - build the app virtualenv with access to system Python packages so apt-installed `gi`/Hailo bindings remain visible.
 - run Hailo post-install for the `detection` group so the default HEF, post-process libraries, and environment file exist before the worker starts.
+- reuse already-downloaded Hailo detection resources on later syncs and only rebuild the post-process side when the files are already present.
 
 Fresh install or update from GitHub:
 

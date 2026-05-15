@@ -100,9 +100,23 @@ install_python_app() {
   if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
     log "Installing official Hailo Apps Python package"
     "${APP_DIR}/.venv/bin/pip" install "hailo-apps @ git+https://github.com/hailo-ai/hailo-apps.git@${HAILO_APPS_REF}"
-    log "Preparing Hailo detection resources"
+    prepare_hailo_resources
+  fi
+}
+
+prepare_hailo_resources() {
+  local detection_model="/usr/local/hailo/resources/models/hailo8l/yolov8s.hef"
+  local detection_postprocess="/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so"
+
+  log "Preparing Hailo detection resources"
+  if [[ -f "${detection_model}" && -f "${detection_postprocess}" ]]; then
+    "${APP_DIR}/.venv/bin/hailo-post-install" --group detection --skip-download
+  else
     "${APP_DIR}/.venv/bin/hailo-post-install" --group detection
   fi
+
+  chgrp -R "${SERVICE_GROUP}" /usr/local/hailo
+  chmod -R g+rX /usr/local/hailo
 }
 
 verify_hailo_python() {
