@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Login - Smart AI{% endblock %}
+{% block content %}
+<section class="auth-panel">
+  <h2>Login</h2>
+  <form method="post" action="/login">
+    <label>Admin password <input name="password" type="password" required autofocus></label>
+    <button type="submit">Login</button>
+  </form>
+</section>
+{% endblock %}

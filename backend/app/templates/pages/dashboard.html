@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Smart AI{% endblock %}
+{% block content %}
+<section class="page-header">
+  <h2>Dashboard</h2>
+  <p>Local appliance status and configured automation.</p>
+</section>
+<section class="stats">
+  <article><strong>{{ camera_count }}</strong><span>Cameras</span></article>
+  <article><strong>{{ rule_count }}</strong><span>Rules</span></article>
+  <article><strong>{{ relay_count }}</strong><span>Relay channels</span></article>
+  <article><strong>{{ event_count }}</strong><span>Recent events</span></article>
+  <article><strong>{{ plugins|join(", ") }}</strong><span>Plugins</span></article>
+</section>
+<section class="panel" hx-get="/ui/system/health" hx-trigger="load, every 10s" hx-swap="innerHTML">
+  Loading health...
+</section>
+<section class="panel">
+  <h3>Latest Events</h3>
+  <table>
+    <thead><tr><th>Time</th><th>Rule</th><th>Metric</th><th>Value</th><th>Snapshot</th></tr></thead>
+    <tbody>
+      {% for event in events %}
+      <tr>
+        <td>{{ event.created_at }}</td>
+        <td>{{ event.rule_id }}</td>
+        <td>{{ event.metric }}</td>
+        <td>{{ event.value }}</td>
+        <td>{% if event.snapshot_path %}<a href="/api/events/{{ event.id }}/snapshot">View</a>{% else %}-{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">No events yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

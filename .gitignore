@@ -1,0 +1,10 @@
+.smartai/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+node_modules/
+

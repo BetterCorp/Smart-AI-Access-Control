@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Bootstrap Admin - Smart AI{% endblock %}
+{% block content %}
+<section class="auth-panel">
+  <h2>Create Admin</h2>
+  <form method="post" action="/bootstrap">
+    <label>Admin password <input name="password" type="password" minlength="12" required autofocus></label>
+    <button type="submit">Create Admin</button>
+  </form>
+</section>
+{% endblock %}
+

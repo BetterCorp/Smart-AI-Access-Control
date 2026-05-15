@@ -1,0 +1,156 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, sans-serif;
+  background: #eef1f4;
+  color: #18212b;
+}
+
+body {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #18212b;
+  color: #fff;
+  padding: 20px;
+}
+
+.sidebar h1 {
+  font-size: 20px;
+  margin: 0 0 24px;
+}
+
+.sidebar nav {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar a {
+  color: #dce5ee;
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.sidebar a:hover {
+  background: #263545;
+}
+
+.logout-form {
+  margin-top: 24px;
+}
+
+.content {
+  padding: 24px;
+}
+
+.page-header {
+  margin-bottom: 16px;
+}
+
+.page-header h2 {
+  margin: 0 0 4px;
+}
+
+.panel,
+.stats article {
+  background: #fff;
+  border: 1px solid #d9e0e7;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stats strong {
+  display: block;
+  font-size: 24px;
+}
+
+.stats span {
+  color: #536170;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #3f4d5b;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  min-height: 36px;
+}
+
+input,
+select {
+  border: 1px solid #b9c4ce;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  background: #176b87;
+  color: #fff;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+}
+
+.health-grid dt {
+  color: #536170;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e2e7ec;
+  padding: 8px;
+  text-align: left;
+}
+
+.notice {
+  background: #edf7f2;
+  border: 1px solid #b9dfcb;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+@media (max-width: 760px) {
+  body {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
+}

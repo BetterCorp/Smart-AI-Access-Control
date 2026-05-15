@@ -1,0 +1,20 @@
+<section id="rules-table" class="panel">
+  <h3>Configured Rules</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Plugin</th><th>Condition</th><th>Actions</th><th>Priority</th><th></th></tr></thead>
+    <tbody>
+      {% for rule in rules %}
+      <tr>
+        <td>{{ rule.name }}</td>
+        <td>{{ rule.plugin_id }}</td>
+        <td>{{ rule.condition.metric }} {{ rule.condition.operator }} {{ rule.condition.value }}</td>
+        <td>{{ rule.true_actions|length }} true / {{ rule.false_actions|length }} false / {{ rule.fault_actions|length }} fault</td>
+        <td>{{ rule.priority }}</td>
+        <td><button hx-post="/ui/rules/{{ rule.id }}/delete" hx-target="#rules-table" hx-swap="outerHTML">Delete</button></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">No rules configured.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

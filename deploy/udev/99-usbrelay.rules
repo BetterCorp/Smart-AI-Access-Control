@@ -1,0 +1,2 @@
+SUBSYSTEM=="hidraw", MODE="0660", GROUP="smartai"
+

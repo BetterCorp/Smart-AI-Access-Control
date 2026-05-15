@@ -1,0 +1,13 @@
+{
+  "name": "smart-ai-access-control-ui",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild backend/app/static/src/ui.ts --bundle --format=esm --outfile=backend/app/static/dist/ui.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}

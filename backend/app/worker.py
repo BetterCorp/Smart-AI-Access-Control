@@ -1,0 +1,297 @@
+from __future__ import annotations
+
+import json
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Protocol
+
+from backend.app.config import load_settings
+from backend.app.db import Database, Repository
+from backend.app.domain import (
+    Action,
+    CameraConfig,
+    Detection,
+    Observation,
+    RelayAction,
+    RelayDesiredState,
+    RuleConfig,
+    RuleState,
+    SnapshotDelivery,
+    WebhookAction,
+)
+from backend.app.plugins.object_count import ObjectCountConfig, ObjectCountPlugin
+from backend.app.relay.service import RelayArbiter, RelayCommand, RelayConflictError, UsbRelayDriver
+from backend.app.rules.engine import RuleEngine
+from backend.app.storage.snapshots import SnapshotStore, StorageConfig, event_id, snapshot_dedupe_key
+from backend.app.webhooks.service import PreparedWebhook, WebhookBuilder
+
+
+ONE_PIXEL_JPEG = bytes.fromhex(
+    "ffd8ffe000104a46494600010101006000600000ffdb0043000302020302020303030304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e0b0b1016101113141515150c0f171816141812141514ffdb00430103040405040509050509140d0b0d14141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414ffc00011080001000103012200021101031101ffc4001400010000000000000000000000000000000000000008ffc40014100100000000000000000000000000000000000000ffda000c03010002110311003f00b2c001ffd9"
+)
+
+
+class InferenceProvider(Protocol):
+    def observations_for(self, camera: CameraConfig) -> list[Observation]:
+        ...
+
+
+@dataclass
+class MockInferenceProvider:
+    counts: dict[str, int]
+
+    def observations_for(self, camera: CameraConfig) -> list[Observation]:
+        count = self.counts.get(camera.id, 0)
+        detections = [
+            Detection("person", 0.9, (0.1 + index * 0.05, 0.1, 0.2, 0.5))
+            for index in range(max(0, count))
+        ]
+        return ObjectCountPlugin().on_detections(camera, detections, ObjectCountConfig("person", 0.5))
+
+
+class HailoGStreamerProvider:
+    def observations_for(self, camera: CameraConfig) -> list[Observation]:
+        raise RuntimeError(
+            "Hailo provider is not wired in this environment. Set SMARTAI_MOCK_INFERENCE=1 or implement the Pi GStreamer adapter."
+        )
+
+
+class Worker:
+    def __init__(
+        self,
+        repo: Repository,
+        snapshot_store: SnapshotStore,
+        inference: InferenceProvider,
+        relay_driver: UsbRelayDriver | None = None,
+    ) -> None:
+        self.repo = repo
+        self.snapshot_store = snapshot_store
+        self.inference = inference
+        self.relay_driver = relay_driver
+        self.rule_engine = RuleEngine()
+        self.webhooks = WebhookBuilder()
+        self.relay_arbiter = RelayArbiter()
+
+    def run_forever(self, interval_seconds: float = 1.0) -> None:
+        while True:
+            self.process_once()
+            time.sleep(interval_seconds)
+
+    def process_once(self) -> None:
+        cameras = self.repo.list_cameras()
+        camera_by_id = {camera.id: camera for camera in cameras}
+        observations_by_camera: dict[str, list[Observation]] = {}
+
+        for camera in cameras:
+            try:
+                observations_by_camera[camera.id] = self.inference.observations_for(camera)
+                self.repo.set_camera_health(camera.id, "online")
+            except Exception as exc:
+                observations_by_camera[camera.id] = []
+                self.repo.set_camera_health(camera.id, "stream_error", str(exc))
+
+        relay_commands: list[RelayCommand] = []
+        for rule in self.repo.list_rules():
+            observations = []
+            for camera_id in rule.camera_ids:
+                observations.extend(observations_by_camera.get(camera_id, []))
+            faulted = any(camera_id not in observations_by_camera or not observations_by_camera[camera_id] for camera_id in rule.camera_ids)
+            evaluation = self.rule_engine.evaluate(rule, observations, datetime.now(timezone.utc), faulted=faulted)
+            event_actions = evaluation.actions
+
+            if evaluation.matched_observation is not None and evaluation.state in {RuleState.TRUE, RuleState.FALSE}:
+                event_actions = self._persist_event_if_changed(rule, evaluation.state, evaluation.matched_observation, event_actions)
+
+            relay_commands.extend(self._relay_commands(rule, event_actions))
+            self._dispatch_webhooks(rule, camera_by_id, evaluation.state, evaluation.matched_observation, event_actions)
+
+        self._apply_relays(relay_commands)
+        self.snapshot_store.prune()
+
+    def _persist_event_if_changed(
+        self,
+        rule: RuleConfig,
+        state: RuleState,
+        observation: Observation,
+        actions: list[Action],
+    ) -> list[Action]:
+        row = self.repo.get_rule_row(rule.id)
+        previous_key = row["last_dedupe_key"] if row else None
+        dedupe_key = snapshot_dedupe_key(
+            rule.id,
+            observation.camera_id,
+            state.value,
+            observation.metric,
+            observation.value,
+            observation.zone_id,
+        )
+        if not self.snapshot_store.should_store(dedupe_key, previous_key, min_interval_elapsed=True):
+            self.repo.update_rule_runtime(rule.id, state, observation.value, previous_key)
+            return actions
+
+        eid = event_id()
+        snapshot = self.snapshot_store.write_snapshot(eid, ONE_PIXEL_JPEG)
+        self.repo.create_event(
+            event_id=eid,
+            camera_id=observation.camera_id,
+            rule_id=rule.id,
+            state=state,
+            metric=observation.metric,
+            value=observation.value,
+            observation_json=observation_to_json(observation),
+            snapshot=snapshot,
+        )
+        self.repo.update_rule_runtime(rule.id, state, observation.value, dedupe_key)
+        return actions
+
+    def _relay_commands(self, rule: RuleConfig, actions: list[Action]) -> list[RelayCommand]:
+        commands = []
+        for action in actions:
+            if isinstance(action, RelayAction):
+                commands.append(
+                    RelayCommand(
+                        channel_id=action.relay_channel_id,
+                        state=action.desired_state,
+                        source_rule_id=rule.id,
+                        priority=rule.priority,
+                    )
+                )
+        return commands
+
+    def _dispatch_webhooks(
+        self,
+        rule: RuleConfig,
+        camera_by_id: dict[str, CameraConfig],
+        state: RuleState,
+        observation: Observation | None,
+        actions: list[Action],
+    ) -> None:
+        if observation is None:
+            return
+        event = latest_event_for(self.repo, rule.id, observation.camera_id)
+        snapshot_bytes = None
+        snapshot_ref = None
+        if event and event["snapshot_path"]:
+            path = Path(event["snapshot_path"])
+            if path.exists():
+                snapshot_bytes = path.read_bytes()
+                snapshot_ref = snapshot_ref_from_event(event)
+
+        for action in actions:
+            if not isinstance(action, WebhookAction):
+                continue
+            prepared = self.webhooks.prepare(
+                action,
+                event_id=event["id"] if event else event_id(),
+                camera={
+                    "id": observation.camera_id,
+                    "name": camera_by_id.get(observation.camera_id, CameraConfig(observation.camera_id, observation.camera_id, "", 0, "")).name,
+                },
+                rule={"id": rule.id, "name": rule.name, "state": state.value},
+                observation=observation,
+                snapshot=snapshot_ref,
+                snapshot_bytes=snapshot_bytes,
+            )
+            status = send_webhook(prepared)
+            if event:
+                self.repo.update_event_webhook_status(event["id"], status)
+
+    def _apply_relays(self, commands: list[RelayCommand]) -> None:
+        try:
+            states = self.relay_arbiter.resolve(commands)
+        except RelayConflictError:
+            return
+
+        relays = {relay.id: relay for relay in self.repo.list_relays()}
+        for relay_id, state in states.items():
+            relay = relays.get(relay_id)
+            if relay is None:
+                continue
+            if self.relay_driver is not None:
+                self.relay_driver.set_channel(relay.board_id, relay.channel_number, state)
+            self.repo.update_relay_state(relay_id, state)
+
+
+def latest_event_for(repo: Repository, rule_id: str, camera_id: str):
+    for event in repo.list_events(limit=50):
+        if event["rule_id"] == rule_id and event["camera_id"] == camera_id:
+            return event
+    return None
+
+
+def snapshot_ref_from_event(event) -> object:
+    from backend.app.domain import SnapshotRef
+
+    path = Path(event["snapshot_path"])
+    return SnapshotRef(
+        event_id=event["id"],
+        path=str(path),
+        mime_type="image/jpeg",
+        filename=path.name,
+        sha256=event["snapshot_sha256"] or "",
+        bytes_len=path.stat().st_size if path.exists() else 0,
+    )
+
+
+def observation_to_json(observation: Observation) -> dict[str, object]:
+    return {
+        "pluginId": observation.plugin_id,
+        "cameraId": observation.camera_id,
+        "metric": observation.metric,
+        "value": observation.value,
+        "zoneId": observation.zone_id,
+        "labels": observation.labels,
+        "timestamp": observation.timestamp.isoformat(),
+    }
+
+
+def send_webhook(prepared: PreparedWebhook) -> str:
+    request = urllib.request.Request(prepared.url, data=prepared.body, headers=prepared.headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=prepared.timeout_ms / 1000) as response:
+            return f"sent:{response.status}"
+    except urllib.error.URLError as exc:
+        return f"failed:{exc.reason}"
+    except Exception as exc:
+        return f"failed:{exc}"
+
+
+def mock_counts_from_settings(repo: Repository) -> dict[str, int]:
+    raw = repo.get_setting("mock_person_counts", "{}")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return {str(key): int(value) for key, value in payload.items()}
+
+
+def build_worker() -> Worker:
+    settings = load_settings()
+    repository = Repository(Database(settings.db_path))
+    snapshot_store = SnapshotStore(
+        StorageConfig(
+            snapshot_root=settings.snapshot_root,
+            max_bytes=int(repository.get_setting("snapshot_max_bytes", str(10 * 1024 * 1024 * 1024))),
+            min_free_disk_percent=float(repository.get_setting("snapshot_min_free_disk_percent", "20")),
+        )
+    )
+    inference: InferenceProvider
+    if settings.use_mock_inference:
+        inference = MockInferenceProvider(mock_counts_from_settings(repository))
+    else:
+        inference = HailoGStreamerProvider()
+    relay_driver = UsbRelayDriver() if settings.enable_relay_hardware else None
+    return Worker(repository, snapshot_store, inference, relay_driver)
+
+
+def main() -> None:
+    build_worker().run_forever()
+
+
+if __name__ == "__main__":
+    main()
+

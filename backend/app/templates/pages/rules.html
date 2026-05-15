@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Rules - Smart AI{% endblock %}
+{% block content %}
+<section class="page-header">
+  <h2>Rules</h2>
+</section>
+<form class="panel form-grid" hx-post="/ui/rules" hx-target="#rules-table" hx-swap="outerHTML">
+  <label>Name <input name="name" required placeholder="Mantrap occupancy"></label>
+  <label>Camera
+    <select name="camera_id" required>
+      {% for camera in cameras %}
+      <option value="{{ camera.id }}">{{ camera.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Metric <input name="metric" value="person.count"></label>
+  <label>Operator
+    <select name="operator">
+      <option>&gt;=</option>
+      <option>&gt;</option>
+      <option>==</option>
+      <option>!=</option>
+      <option>&lt;</option>
+      <option>&lt;=</option>
+    </select>
+  </label>
+  <label>Value <input name="value" type="number" value="2"></label>
+  <label>True Relay
+    <select name="true_relay_id">
+      <option value="">None</option>
+      {% for relay in relays %}
+      <option value="{{ relay.id }}">{{ relay.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>True State
+    <select name="true_relay_state">
+      <option value="on">On</option>
+      <option value="off">Off</option>
+    </select>
+  </label>
+  <label>False Relay
+    <select name="false_relay_id">
+      <option value="">None</option>
+      {% for relay in relays %}
+      <option value="{{ relay.id }}">{{ relay.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>False State
+    <select name="false_relay_state">
+      <option value="off">Off</option>
+      <option value="on">On</option>
+    </select>
+  </label>
+  <label>Webhook URL <input name="webhook_url" type="url" placeholder="https://receiver.local/hook"></label>
+  <label>Snapshot Mode
+    <select name="webhook_snapshot_delivery">
+      <option value="multipart">Multipart JPEG</option>
+      <option value="base64_json">Base64 JSON</option>
+      <option value="url_only">URL only</option>
+    </select>
+  </label>
+  <label>True Debounce ms <input name="debounce_true_ms" type="number" value="500" min="0"></label>
+  <label>False Debounce ms <input name="debounce_false_ms" type="number" value="500" min="0"></label>
+  <label>Cooldown ms <input name="cooldown_ms" type="number" value="1000" min="0"></label>
+  <label>Fail Policy
+    <select name="fail_policy">
+      <option value="global">Global</option>
+      <option value="fail_off">Fail off</option>
+      <option value="fail_on">Fail on</option>
+      <option value="hold_state">Hold state</option>
+    </select>
+  </label>
+  <button type="submit">Add Rule</button>
+</form>
+{% include "partials/rules_table.html" %}
+{% endblock %}

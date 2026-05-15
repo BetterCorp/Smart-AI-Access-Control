@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Smart AI Access Control{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+    <script type="module" src="/static/dist/ui.js"></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <h1>Smart AI</h1>
+      <nav>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/cameras">Cameras</a>
+        <a href="/rules">Rules</a>
+        <a href="/relays">Relays</a>
+        <a href="/events">Events</a>
+        <a href="/storage">Storage</a>
+      </nav>
+      <form method="post" action="/logout" class="logout-form">
+        <button type="submit">Logout</button>
+      </form>
+    </aside>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

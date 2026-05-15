@@ -1,0 +1,25 @@
+<section id="storage-settings" class="panel">
+  <form class="form-grid" hx-post="/ui/storage" hx-target="#storage-settings" hx-swap="outerHTML">
+    <label>Max Snapshot Bytes
+      <input name="snapshot_max_bytes" type="number" min="1048576" value="{{ settings.snapshot_max_bytes }}">
+    </label>
+    <label>Minimum Free Disk %
+      <input name="snapshot_min_free_disk_percent" type="number" min="1" max="95" value="{{ settings.snapshot_min_free_disk_percent }}">
+    </label>
+    <label>Global Webhook URL
+      <input name="webhook_url" type="url" value="{{ settings.webhook_url }}">
+    </label>
+    <label>Global Snapshot Mode
+      <select name="webhook_snapshot_delivery">
+        <option value="multipart" {% if settings.webhook_snapshot_delivery == "multipart" %}selected{% endif %}>Multipart JPEG</option>
+        <option value="base64_json" {% if settings.webhook_snapshot_delivery == "base64_json" %}selected{% endif %}>Base64 JSON</option>
+        <option value="url_only" {% if settings.webhook_snapshot_delivery == "url_only" %}selected{% endif %}>URL only</option>
+      </select>
+    </label>
+    <label>Webhook HMAC Secret
+      <input name="webhook_hmac_secret" type="password" placeholder="Leave blank to keep existing">
+    </label>
+    <button type="submit">Save Settings</button>
+  </form>
+</section>
+

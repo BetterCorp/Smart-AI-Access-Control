@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Relays - Smart AI{% endblock %}
+{% block content %}
+<section class="page-header">
+  <h2>Relays</h2>
+</section>
+<section class="panel">
+  <form hx-post="/ui/relays/test-channel" hx-target="#relay-test-result">
+    <label>Channel
+      <select name="relay_id">
+        {% for relay in relays %}
+        <option value="{{ relay.id }}">{{ relay.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>State
+      <select name="state_value">
+        <option value="off">Off</option>
+        <option value="on">On</option>
+      </select>
+    </label>
+    <button type="submit">Dry Run Test</button>
+  </form>
+  <div id="relay-test-result"></div>
+</section>
+{% endblock %}
+

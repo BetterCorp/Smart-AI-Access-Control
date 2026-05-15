@@ -1,0 +1,23 @@
+[Unit]
+Description=Smart AI Access Control Worker
+After=network-online.target smartai-api.service
+Wants=network-online.target
+
+[Service]
+User=smartai
+Group=smartai
+WorkingDirectory=/opt/smart-ai-access-control
+Environment=PYTHONUNBUFFERED=1
+Environment=SMARTAI_DATA_DIR=/var/lib/smartai
+Environment=SMARTAI_DB=/var/lib/smartai/smartai.db
+Environment=SMARTAI_SNAPSHOT_ROOT=/var/lib/smartai/snapshots
+Environment=SMARTAI_MOCK_INFERENCE=1
+Environment=SMARTAI_ENABLE_RELAY_HARDWARE=0
+ExecStart=/opt/smart-ai-access-control/.venv/bin/python -m backend.app.worker
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
