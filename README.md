@@ -152,6 +152,11 @@ After switching to real inference, the Cameras page shows the last stream/provid
 
 The setup script verifies the worker virtualenv can import `gi`, `hailo`, and `hailo_apps` before it restarts services. If that verification fails, setup stops with the missing binding instead of leaving the worker in a hidden half-configured state.
 
+Health separates relay software enablement from relay visibility:
+
+- `Relay control enabled` reflects `SMARTAI_ENABLE_RELAY_HARDWARE`.
+- `Relay channels visible` is how many channels the worker can see through the `usbrelay` command.
+
 ## License
 
 AGPL-3.0-only OR Commercial.

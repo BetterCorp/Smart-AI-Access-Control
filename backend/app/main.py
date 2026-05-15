@@ -521,7 +521,8 @@ def health() -> dict[str, object]:
         "workerHeartbeatAt": worker_status["heartbeat_at"] if worker_status else None,
         "inferenceMode": worker_status["inference_mode"] if worker_status else "unknown",
         "mockInference": worker_status["inference_mode"] == "mock" if worker_status else None,
-        "relayHardware": bool(worker_status["relay_hardware_enabled"]) if worker_status else None,
+        "relayControlEnabled": bool(worker_status["relay_hardware_enabled"]) if worker_status else None,
+        "relayDevicesVisible": int(worker_status["relay_device_count"]) if worker_status else None,
         "db": str(settings.db_path),
         "pid": os.getpid(),
     }

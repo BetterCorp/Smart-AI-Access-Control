@@ -100,6 +100,7 @@ class Worker:
         self.relay_arbiter = RelayArbiter()
         self.inference_mode = inference_mode
         self.relay_hardware_enabled = relay_driver is not None if relay_hardware_enabled is None else relay_hardware_enabled
+        self.relay_probe = relay_driver or UsbRelayDriver()
 
     def run_forever(self, interval_seconds: float = 1.0) -> None:
         while True:
@@ -107,7 +108,11 @@ class Worker:
             time.sleep(interval_seconds)
 
     def process_once(self) -> None:
-        self.repo.update_worker_status(self.inference_mode, self.relay_hardware_enabled)
+        self.repo.update_worker_status(
+            self.inference_mode,
+            self.relay_hardware_enabled,
+            self.relay_probe.device_count(),
+        )
         cameras = self.repo.list_cameras()
         camera_by_id = {camera.id: camera for camera in cameras}
         observations_by_monitor: dict[str, list[Observation]] = {}

@@ -84,11 +84,12 @@ def test_worker_status_is_persisted_and_changes_health_signature(tmp_path) -> No
     repo = Repository(Database(tmp_path / "smartai.db"))
     before = repo.live_signatures()
 
-    repo.update_worker_status("real", relay_hardware_enabled=False)
+    repo.update_worker_status("real", relay_hardware_enabled=False, relay_device_count=4)
     status = repo.get_worker_status()
     after = repo.live_signatures()
 
     assert status is not None
     assert status["inference_mode"] == "real"
     assert status["relay_hardware_enabled"] == 0
+    assert status["relay_device_count"] == 4
     assert before["health"] != after["health"]

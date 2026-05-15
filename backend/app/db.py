@@ -140,6 +140,7 @@ class Database:
                   id INTEGER PRIMARY KEY CHECK (id = 1),
                   inference_mode TEXT NOT NULL,
                   relay_hardware_enabled INTEGER NOT NULL,
+                  relay_device_count INTEGER NOT NULL DEFAULT 0,
                   heartbeat_at TEXT NOT NULL
                 );
 
@@ -189,6 +190,7 @@ class Database:
             )
             self._add_column(conn, "rules", "monitor_id", "TEXT")
             self._add_column(conn, "rules", "condition_group_json", "TEXT")
+            self._add_column(conn, "worker_status", "relay_device_count", "INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -450,18 +452,24 @@ class Repository:
                 (monitor_id,),
             ).fetchone()
 
-    def update_worker_status(self, inference_mode: str, relay_hardware_enabled: bool) -> None:
+    def update_worker_status(
+        self,
+        inference_mode: str,
+        relay_hardware_enabled: bool,
+        relay_device_count: int = 0,
+    ) -> None:
         with self.db.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO worker_status (id, inference_mode, relay_hardware_enabled, heartbeat_at)
-                VALUES (1, ?, ?, ?)
+                INSERT INTO worker_status (id, inference_mode, relay_hardware_enabled, relay_device_count, heartbeat_at)
+                VALUES (1, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   inference_mode = excluded.inference_mode,
                   relay_hardware_enabled = excluded.relay_hardware_enabled,
+                  relay_device_count = excluded.relay_device_count,
                   heartbeat_at = excluded.heartbeat_at
                 """,
-                (inference_mode, 1 if relay_hardware_enabled else 0, utc_iso()),
+                (inference_mode, 1 if relay_hardware_enabled else 0, relay_device_count, utc_iso()),
             )
 
     def get_worker_status(self) -> sqlite3.Row | None:
