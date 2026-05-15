@@ -7,6 +7,7 @@ PERSON_COUNTER = AIModelDefinition(
     id="person_counter",
     name="Person Counter",
     description="Counts people and exposes count/presence metrics.",
+    actual_model="YOLOv8 object detector",
     analytics_uses=[
         "occupancy counting",
         "mantrap occupancy",
@@ -23,6 +24,7 @@ WEAPON_VISIBILITY = AIModelDefinition(
     id="weapon_visibility",
     name="Weapon Visibility",
     description="Detects whether a configured weapon class is visible.",
+    actual_model="Custom YOLO-family object detector",
     analytics_uses=[
         "weapon presence alerting",
         "prohibited-object detection",

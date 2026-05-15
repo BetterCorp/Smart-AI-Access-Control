@@ -6,14 +6,15 @@
   <p>Monitors run an AI model or analytic and publish typed metrics for rules.</p>
 </section>
 <section class="panel">
-  <h3>AI Model Outputs</h3>
+  <h3>AI Model Catalog</h3>
   <table>
-    <thead><tr><th>Model</th><th>Used For Analytics</th><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+    <thead><tr><th>Analytics Monitor</th><th>Actual AI Model</th><th>Used For Analytics</th><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
       {% for model in models %}
         {% for metric in model.metrics %}
         <tr>
           <td>{{ model.name }}</td>
+          <td>{{ model.actual_model }}</td>
           <td>{{ model.analytics_uses|join(", ") }}</td>
           <td><code>{{ metric.key }}</code></td>
           <td>{{ metric.value_type.value }}</td>

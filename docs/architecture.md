@@ -20,6 +20,8 @@ Camera -> AI Monitor -> typed metrics -> Rule -> Outputs
 
 An AI monitor represents a monitoring function such as `Person Counter` or `Weapon Visibility`. Each monitor is attached to one camera and publishes named metrics:
 
+- `Person Counter` is backed by a YOLOv8 object detector.
+- `Weapon Visibility` is intended to be backed by a custom YOLO-family object detector.
 - `person.count`: number
 - `person.present`: boolean
 - `weapon.visible`: boolean

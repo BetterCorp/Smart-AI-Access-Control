@@ -23,8 +23,8 @@ The system separates camera input, AI interpretation, rules, and outputs:
 
 Examples:
 
-- `Person Counter` monitor publishes `person.count` as a number and `person.present` as a boolean.
-- `Weapon Visibility` monitor publishes `weapon.visible` as a boolean and `weapon.count` as a number.
+- `Person Counter` uses a `YOLOv8 object detector` and publishes `person.count` as a number and `person.present` as a boolean.
+- `Weapon Visibility` uses a `custom YOLO-family object detector` and publishes `weapon.visible` as a boolean and `weapon.count` as a number.
 - The AI model list also shows which analytics each monitor type is intended for, such as occupancy counting or weapon presence alerting.
 - A mantrap rule can evaluate `person.count >= 2`.
 - A weapon rule can evaluate `weapon.visible is true`.
