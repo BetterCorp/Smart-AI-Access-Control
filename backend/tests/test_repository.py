@@ -78,3 +78,17 @@ def test_live_signatures_change_when_monitor_output_changes(tmp_path) -> None:
 
     assert before["monitor_outputs"] != after["monitor_outputs"]
     assert before["health"] != after["health"]
+
+
+def test_worker_status_is_persisted_and_changes_health_signature(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    before = repo.live_signatures()
+
+    repo.update_worker_status("real", relay_hardware_enabled=False)
+    status = repo.get_worker_status()
+    after = repo.live_signatures()
+
+    assert status is not None
+    assert status["inference_mode"] == "real"
+    assert status["relay_hardware_enabled"] == 0
+    assert before["health"] != after["health"]

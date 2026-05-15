@@ -25,6 +25,7 @@ def test_worker_creates_snapshot_event_and_updates_relay(tmp_path) -> None:
         repo,
         SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
         MockInferenceProvider({"mon-1": 2}),
+        inference_mode="mock",
     )
 
     worker.process_once()
@@ -37,6 +38,7 @@ def test_worker_creates_snapshot_event_and_updates_relay(tmp_path) -> None:
     assert events[0]["snapshot_path"]
     states = repo.list_monitor_states()
     assert {state["metric"] for state in states} == {"person.count", "person.present"}
+    assert repo.get_worker_status()["inference_mode"] == "mock"
     with db.connect() as conn:
         row = conn.execute("SELECT current_state FROM relay_channels WHERE id = 'relay-1'").fetchone()
     assert row["current_state"] == "on"

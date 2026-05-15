@@ -6,7 +6,10 @@
   <dt>Rules</dt><dd>{{ health.rules }}</dd>
   <dt>Relays</dt><dd>{{ health.relays }}</dd>
   <dt>Events</dt><dd>{{ health.events }}</dd>
-  <dt>Mock inference</dt><dd>{{ health.mockInference }}</dd>
-  <dt>Relay hardware</dt><dd>{{ health.relayHardware }}</dd>
+  <dt>Worker seen</dt><dd>{{ health.workerSeen }}</dd>
+  <dt>Worker heartbeat</dt><dd>{{ health.workerHeartbeatAt or "not seen" }}</dd>
+  <dt>Inference mode</dt><dd>{{ health.inferenceMode }}</dd>
+  <dt>Mock inference</dt><dd>{{ health.mockInference if health.mockInference is not none else "unknown" }}</dd>
+  <dt>Relay hardware</dt><dd>{{ health.relayHardware if health.relayHardware is not none else "unknown" }}</dd>
   <dt>Database</dt><dd><code>{{ health.db }}</code></dd>
 </dl>

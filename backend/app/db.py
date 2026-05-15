@@ -136,6 +136,13 @@ class Database:
                   observed_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS worker_status (
+                  id INTEGER PRIMARY KEY CHECK (id = 1),
+                  inference_mode TEXT NOT NULL,
+                  relay_hardware_enabled INTEGER NOT NULL,
+                  heartbeat_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS rules (
                   id TEXT PRIMARY KEY,
                   name TEXT NOT NULL,
@@ -439,6 +446,24 @@ class Repository:
                 (monitor_id,),
             ).fetchone()
 
+    def update_worker_status(self, inference_mode: str, relay_hardware_enabled: bool) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_status (id, inference_mode, relay_hardware_enabled, heartbeat_at)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  inference_mode = excluded.inference_mode,
+                  relay_hardware_enabled = excluded.relay_hardware_enabled,
+                  heartbeat_at = excluded.heartbeat_at
+                """,
+                (inference_mode, 1 if relay_hardware_enabled else 0, utc_iso()),
+            )
+
+    def get_worker_status(self) -> sqlite3.Row | None:
+        with self.db.connect() as conn:
+            return conn.execute("SELECT * FROM worker_status WHERE id = 1").fetchone()
+
     def live_signatures(self) -> dict[str, str]:
         with self.db.connect() as conn:
             monitor_outputs = conn.execute(
@@ -456,12 +481,15 @@ class Repository:
             cameras = conn.execute(
                 "SELECT COALESCE(MAX(updated_at), '') FROM cameras"
             ).fetchone()[0]
+            worker_status = conn.execute(
+                "SELECT COALESCE(MAX(heartbeat_at), '') FROM worker_status"
+            ).fetchone()[0]
         return {
             "monitor_outputs": str(monitor_outputs),
             "monitor_debug": str(monitor_debug),
             "events": str(events),
             "relays": str(relays),
-            "health": "|".join(str(value) for value in [monitor_outputs, monitor_debug, events, relays, cameras]),
+            "health": "|".join(str(value) for value in [monitor_outputs, monitor_debug, events, relays, cameras, worker_status]),
         }
 
     def set_camera_health(self, camera_id: str, health: str, last_error: str | None = None) -> None:

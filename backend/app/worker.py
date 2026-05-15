@@ -94,6 +94,8 @@ class Worker:
         snapshot_store: SnapshotStore,
         inference: InferenceProvider,
         relay_driver: UsbRelayDriver | None = None,
+        inference_mode: str = "unknown",
+        relay_hardware_enabled: bool | None = None,
     ) -> None:
         self.repo = repo
         self.snapshot_store = snapshot_store
@@ -102,6 +104,8 @@ class Worker:
         self.rule_engine = RuleEngine()
         self.webhooks = WebhookBuilder()
         self.relay_arbiter = RelayArbiter()
+        self.inference_mode = inference_mode
+        self.relay_hardware_enabled = relay_driver is not None if relay_hardware_enabled is None else relay_hardware_enabled
 
     def run_forever(self, interval_seconds: float = 1.0) -> None:
         while True:
@@ -109,6 +113,7 @@ class Worker:
             time.sleep(interval_seconds)
 
     def process_once(self) -> None:
+        self.repo.update_worker_status(self.inference_mode, self.relay_hardware_enabled)
         cameras = self.repo.list_cameras()
         camera_by_id = {camera.id: camera for camera in cameras}
         observations_by_monitor: dict[str, list[Observation]] = {}
@@ -320,10 +325,19 @@ def build_worker() -> Worker:
     inference: InferenceProvider
     if settings.use_mock_inference:
         inference = MockInferenceProvider(mock_counts_from_settings(repository))
+        inference_mode = "mock"
     else:
         inference = HailoGStreamerProvider()
+        inference_mode = "real"
     relay_driver = UsbRelayDriver() if settings.enable_relay_hardware else None
-    return Worker(repository, snapshot_store, inference, relay_driver)
+    return Worker(
+        repository,
+        snapshot_store,
+        inference,
+        relay_driver,
+        inference_mode=inference_mode,
+        relay_hardware_enabled=settings.enable_relay_hardware,
+    )
 
 
 def main() -> None:

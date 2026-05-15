@@ -498,6 +498,7 @@ def update_storage(
 
 @app.get("/api/system/health")
 def health() -> dict[str, object]:
+    worker_status = repo.get_worker_status()
     return {
         "ok": True,
         "cameras": len(repo.list_cameras()),
@@ -505,8 +506,11 @@ def health() -> dict[str, object]:
         "rules": len(repo.list_rules()),
         "relays": len(repo.list_relays()),
         "events": len(repo.list_events(limit=1000)),
-        "mockInference": settings.use_mock_inference,
-        "relayHardware": settings.enable_relay_hardware,
+        "workerSeen": worker_status is not None,
+        "workerHeartbeatAt": worker_status["heartbeat_at"] if worker_status else None,
+        "inferenceMode": worker_status["inference_mode"] if worker_status else "unknown",
+        "mockInference": worker_status["inference_mode"] == "mock" if worker_status else None,
+        "relayHardware": bool(worker_status["relay_hardware_enabled"]) if worker_status else None,
         "db": str(settings.db_path),
         "pid": os.getpid(),
     }
