@@ -74,9 +74,11 @@ Recommended base image:
 - Wired Ethernet preferred.
 - Raspberry Pi AI HAT+ attached before installing the Hailo packages.
 
-The installer is idempotent. Run the same command for a fresh install or to update an existing install. It will:
+Deployment is split into two scripts:
 
-- install the minimum bootstrap packages, sync the requested Git branch, and re-exec the checked-out latest setup script once before the full install begins,
+- `scripts/pi-setup.sh` is the small bootstrap entrypoint. It installs the minimum packages, syncs the requested Git branch, then runs the checked-out latest `pi-sync.sh`.
+- `scripts/pi-sync.sh` is the full idempotent install/update worker. It will:
+
 - install required apt packages,
 - create the `smartai` service user,
 - create `/var/lib/smartai` for the SQLite DB and snapshots,
@@ -119,7 +121,7 @@ Run again any time to pull and apply the latest code:
 sudo /opt/smart-ai-access-control/scripts/pi-setup.sh
 ```
 
-Local runs are safe after the bootstrap behavior is present: the script updates the repo first and then re-executes the newly checked-out script before continuing, so it does not keep running stale installer logic after a pull.
+Local `pi-setup.sh` runs are safe because that script only refreshes the checkout and then hands off to the latest versioned `pi-sync.sh`; it does not keep running stale full-install logic after a pull.
 
 Useful installer overrides:
 
