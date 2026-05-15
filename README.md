@@ -72,17 +72,17 @@ Fresh install or update from GitHub:
 curl -fsSL https://raw.githubusercontent.com/BetterCorp/Smart-AI-Access-Control/main/scripts/pi-setup.sh | sudo bash
 ```
 
-If the repository is private, configure a GitHub SSH deploy key on the Pi first. Then either run the checked-out script:
+The repo is public, so the installer uses HTTPS git checkout by default. If you need to override the repo URL, run:
 
 ```bash
-sudo env SMARTAI_REPO_URL=git@github.com:BetterCorp/Smart-AI-Access-Control.git scripts/pi-setup.sh
+sudo env SMARTAI_REPO_URL=https://github.com/BetterCorp/Smart-AI-Access-Control.git scripts/pi-setup.sh
 ```
 
-or pipe the script while preserving the SSH repo URL:
+or pipe the script while preserving the override:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BetterCorp/Smart-AI-Access-Control/main/scripts/pi-setup.sh \
-  | sudo env SMARTAI_REPO_URL=git@github.com:BetterCorp/Smart-AI-Access-Control.git bash
+  | sudo env SMARTAI_REPO_URL=https://github.com/BetterCorp/Smart-AI-Access-Control.git bash
 ```
 
 Run again any time to pull and apply the latest code:

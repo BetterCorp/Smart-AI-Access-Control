@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${SMARTAI_REPO_URL:-git@github.com:BetterCorp/Smart-AI-Access-Control.git}"
+REPO_URL="${SMARTAI_REPO_URL:-https://github.com/BetterCorp/Smart-AI-Access-Control.git}"
 BRANCH="${SMARTAI_BRANCH:-main}"
 APP_DIR="${SMARTAI_APP_DIR:-/opt/smart-ai-access-control}"
 DATA_DIR="${SMARTAI_DATA_DIR:-/var/lib/smartai}"
