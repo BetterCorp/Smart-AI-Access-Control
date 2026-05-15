@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from backend.app.domain import (
+    ConditionGroup,
     Observation,
     RelayAction,
     RelayDesiredState,
@@ -27,13 +28,12 @@ def test_rule_debounces_before_emitting_actions() -> None:
         name="Mantrap",
         enabled=True,
         priority=100,
-        camera_ids=["cam-1"],
-        plugin_id="core.object_count",
-        condition=RuleCondition("person.count", ">=", 2),
+        monitor_id="mon-1",
+        condition_group=ConditionGroup("all", [RuleCondition("person.count", ">=", 2)]),
         true_actions=[action],
         debounce_true_ms=1000,
     )
-    observations = [Observation("core.object_count", "cam-1", "person.count", 2)]
+    observations = [Observation("core.object_count", "cam-1", "person.count", 2, monitor_id="mon-1")]
 
     first = engine.evaluate(rule, observations, now)
     second = engine.evaluate(rule, observations, now + timedelta(milliseconds=999))
@@ -55,9 +55,8 @@ def test_rule_fault_emits_fault_actions() -> None:
         name="Mantrap",
         enabled=True,
         priority=100,
-        camera_ids=["cam-1"],
-        plugin_id="core.object_count",
-        condition=RuleCondition("person.count", ">=", 2),
+        monitor_id="mon-1",
+        condition_group=ConditionGroup("all", [RuleCondition("person.count", ">=", 2)]),
         fault_actions=[action],
     )
 
@@ -66,3 +65,22 @@ def test_rule_fault_emits_fault_actions() -> None:
     assert result.state == RuleState.FAULT
     assert result.actions == [action]
 
+
+def test_rule_supports_boolean_visibility_conditions() -> None:
+    engine = RuleEngine()
+    action = RelayAction("relay-1", RelayDesiredState.ON)
+    rule = RuleConfig(
+        id="rule-weapon",
+        name="Weapon visible",
+        enabled=True,
+        priority=100,
+        monitor_id="mon-weapon",
+        condition_group=ConditionGroup("all", [RuleCondition("weapon.visible", "is_true", True)]),
+        true_actions=[action],
+    )
+    observations = [Observation("core.weapon_visibility", "cam-1", "weapon.visible", True, monitor_id="mon-weapon")]
+
+    result = engine.evaluate(rule, observations, datetime(2026, 5, 15, tzinfo=timezone.utc))
+
+    assert result.state == RuleState.TRUE
+    assert result.actions == [action]
