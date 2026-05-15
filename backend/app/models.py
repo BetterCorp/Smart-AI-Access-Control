@@ -7,6 +7,11 @@ PERSON_COUNTER = AIModelDefinition(
     id="person_counter",
     name="Person Counter",
     description="Counts people and exposes count/presence metrics.",
+    analytics_uses=[
+        "occupancy counting",
+        "mantrap occupancy",
+        "people presence",
+    ],
     metrics=[
         MetricDefinition("person.count", "Person Count", MetricValueType.NUMBER, "Number of visible people."),
         MetricDefinition("person.present", "Person Present", MetricValueType.BOOLEAN, "True when at least one person is visible."),
@@ -18,6 +23,10 @@ WEAPON_VISIBILITY = AIModelDefinition(
     id="weapon_visibility",
     name="Weapon Visibility",
     description="Detects whether a configured weapon class is visible.",
+    analytics_uses=[
+        "weapon presence alerting",
+        "prohibited-object detection",
+    ],
     metrics=[
         MetricDefinition("weapon.visible", "Weapon Visible", MetricValueType.BOOLEAN, "True when a weapon is visible."),
         MetricDefinition("weapon.count", "Weapon Count", MetricValueType.NUMBER, "Number of visible weapons."),

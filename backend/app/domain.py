@@ -56,6 +56,7 @@ class AIModelDefinition:
     id: str
     name: str
     description: str
+    analytics_uses: list[str]
     metrics: list[MetricDefinition]
 
 

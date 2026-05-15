@@ -25,6 +25,7 @@ Examples:
 
 - `Person Counter` monitor publishes `person.count` as a number and `person.present` as a boolean.
 - `Weapon Visibility` monitor publishes `weapon.visible` as a boolean and `weapon.count` as a number.
+- The AI model list also shows which analytics each monitor type is intended for, such as occupancy counting or weapon presence alerting.
 - A mantrap rule can evaluate `person.count >= 2`.
 - A weapon rule can evaluate `weapon.visible is true`.
 
