@@ -87,6 +87,7 @@ The installer is idempotent. Run the same command for a fresh install or to upda
 - restart services,
 - verify `http://127.0.0.1:8000/healthz`.
 - install the official `hailo-apps` Python package used by the real person-counting provider when Hailo support is enabled.
+- build the app virtualenv with access to system Python packages so apt-installed `gi`/Hailo bindings remain visible.
 
 Fresh install or update from GitHub:
 
@@ -148,6 +149,8 @@ sudo env SMARTAI_MOCK_INFERENCE=0 SMARTAI_ENABLE_RELAY_HARDWARE=1 /opt/smart-ai-
 ```
 
 After switching to real inference, the Cameras page shows the last stream/provider error for each camera. A working person monitor should move from `stream_error` to `online`, publish live metrics on the Monitors page, and begin producing debug snapshots.
+
+The setup script verifies the worker virtualenv can import `gi`, `hailo`, and `hailo_apps` before it restarts services. If that verification fails, setup stops with the missing binding instead of leaving the worker in a hidden half-configured state.
 
 ## License
 

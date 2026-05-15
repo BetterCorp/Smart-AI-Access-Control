@@ -43,7 +43,14 @@ apt_install() {
   )
 
   if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
-    packages+=(dkms hailo-all rpicam-apps)
+    packages+=(
+      dkms
+      hailo-all
+      python3-gi
+      python3-gi-cairo
+      gir1.2-gstreamer-1.0
+      rpicam-apps
+    )
   fi
 
   log "Installing system packages"
@@ -88,13 +95,42 @@ sync_repo() {
 
 install_python_app() {
   log "Installing Python application"
-  python3 -m venv "${APP_DIR}/.venv"
+  if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
+    if [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+      python3 -m venv --upgrade --system-site-packages "${APP_DIR}/.venv"
+    else
+      python3 -m venv --system-site-packages "${APP_DIR}/.venv"
+    fi
+  else
+    if [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+      python3 -m venv --upgrade "${APP_DIR}/.venv"
+    else
+      python3 -m venv "${APP_DIR}/.venv"
+    fi
+  fi
   "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip
   "${APP_DIR}/.venv/bin/pip" install -e "${APP_DIR}"
   if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
     log "Installing official Hailo Apps Python package"
     "${APP_DIR}/.venv/bin/pip" install "hailo-apps @ git+https://github.com/hailo-ai/hailo-apps.git@${HAILO_APPS_REF}"
   fi
+}
+
+verify_hailo_python() {
+  if [[ "${ENABLE_HAILO_PACKAGES}" != "1" ]]; then
+    return
+  fi
+
+  log "Verifying Hailo Python bindings"
+  "${APP_DIR}/.venv/bin/python" - <<'PY'
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+import hailo
+import hailo_apps
+
+print("Hailo Python bindings available")
+PY
 }
 
 install_node_assets_if_available() {
@@ -163,6 +199,7 @@ main() {
   ensure_user_and_dirs
   sync_repo
   install_python_app
+  verify_hailo_python
   install_node_assets_if_available
   install_udev
   install_systemd

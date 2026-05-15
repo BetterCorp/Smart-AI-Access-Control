@@ -253,9 +253,15 @@ def load_hailo_bindings() -> dict[str, Any]:
             TRACKER_PIPELINE,
             USER_CALLBACK_PIPELINE,
         )
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            f"Hailo Python/GStreamer bindings are unavailable: missing Python module '{exc.name}'. "
+            "Re-run setup with Hailo support enabled."
+        ) from exc
     except Exception as exc:
         raise RuntimeError(
-            "Hailo Python/GStreamer bindings are unavailable. Re-run setup with Hailo support enabled."
+            f"Hailo Python/GStreamer bindings are unavailable: {exc}. "
+            "Re-run setup with Hailo support enabled."
         ) from exc
 
     return {
