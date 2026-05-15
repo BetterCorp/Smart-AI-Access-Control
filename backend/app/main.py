@@ -151,6 +151,22 @@ def monitors_table(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/ui/monitors/{monitor_id}/edit", response_class=HTMLResponse)
+def edit_monitor_form(request: Request, monitor_id: str) -> HTMLResponse:
+    monitor = repo.get_monitor(monitor_id)
+    if monitor is None:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "partials/monitor_edit_form.html",
+        {
+            "monitor": monitor,
+            "cameras": repo.list_cameras(),
+            "models": model_options(),
+        },
+    )
+
+
 @app.post("/ui/monitors", response_class=HTMLResponse)
 def create_monitor(
     request: Request,
@@ -172,6 +188,38 @@ def create_monitor(
         config={"class_name": class_name, "confidence_threshold": confidence_threshold},
     )
     repo.save_monitor(monitor)
+    if wants_fragment(request):
+        return monitors_table(request)
+    return RedirectResponse("/monitors", status_code=303)
+
+
+@app.post("/ui/monitors/{monitor_id}", response_class=HTMLResponse)
+def update_monitor(
+    request: Request,
+    monitor_id: str,
+    name: str = Form(...),
+    model_id: str = Form(...),
+    camera_id: str = Form(...),
+    class_name: str = Form("person"),
+    confidence_threshold: float = Form(0.5),
+) -> Response:
+    existing = repo.get_monitor(monitor_id)
+    if existing is None:
+        raise HTTPException(status_code=404)
+    if model_id not in MODEL_DEFINITIONS:
+        raise HTTPException(status_code=400, detail="unknown model")
+    if repo.get_camera(camera_id) is None:
+        raise HTTPException(status_code=400, detail="unknown camera")
+    repo.save_monitor(
+        MonitorConfig(
+            id=monitor_id,
+            name=name,
+            model_id=model_id,
+            camera_id=camera_id,
+            enabled=existing.enabled,
+            config={"class_name": class_name, "confidence_threshold": confidence_threshold},
+        )
+    )
     if wants_fragment(request):
         return monitors_table(request)
     return RedirectResponse("/monitors", status_code=303)

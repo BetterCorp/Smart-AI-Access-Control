@@ -9,7 +9,10 @@
         <td>{{ monitor.model_id }}</td>
         <td>{{ monitor.camera_id }}</td>
         <td><code>{{ monitor.config }}</code></td>
-        <td><button hx-post="/ui/monitors/{{ monitor.id }}/delete" hx-target="#monitors-table" hx-swap="outerHTML">Delete</button></td>
+        <td>
+          <button hx-get="/ui/monitors/{{ monitor.id }}/edit" hx-target="#monitor-edit-slot" hx-swap="innerHTML">Edit</button>
+          <button hx-post="/ui/monitors/{{ monitor.id }}/delete" hx-target="#monitors-table" hx-swap="outerHTML">Delete</button>
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="5">No monitors configured.</td></tr>

@@ -28,3 +28,28 @@ def test_repository_persists_camera_and_rule_with_actions(tmp_path) -> None:
     assert loaded_camera == camera
     assert loaded_monitor == monitor
     assert loaded_rule == rule
+
+
+def test_repository_updates_monitor_in_place(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
+    repo.save_camera(CameraConfig("cam-2", "Exit", "192.168.1.51", 554, "/live"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+
+    repo.save_monitor(
+        MonitorConfig(
+            "mon-1",
+            "Exit weapons",
+            "weapon_visibility",
+            "cam-2",
+            config={"class_name": "weapon", "confidence_threshold": 0.7},
+        )
+    )
+
+    assert repo.get_monitor("mon-1") == MonitorConfig(
+        "mon-1",
+        "Exit weapons",
+        "weapon_visibility",
+        "cam-2",
+        config={"class_name": "weapon", "confidence_threshold": 0.7},
+    )

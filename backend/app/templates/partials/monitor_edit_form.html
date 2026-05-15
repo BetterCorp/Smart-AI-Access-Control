@@ -1,0 +1,32 @@
+<section id="monitor-edit-panel" class="panel">
+  <h3>Edit Monitor</h3>
+  <form class="form-grid" hx-post="/ui/monitors/{{ monitor.id }}" hx-target="#monitors-table" hx-swap="outerHTML">
+    <label>Name <input name="name" required value="{{ monitor.name }}"></label>
+    <label>Model
+      <select name="model_id">
+        {% for model in models %}
+        <option value="{{ model.id }}" {% if model.id == monitor.model_id %}selected{% endif %}>{{ model.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Camera
+      <select name="camera_id" required>
+        {% for camera in cameras %}
+        <option value="{{ camera.id }}" {% if camera.id == monitor.camera_id %}selected{% endif %}>{{ camera.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Class <input name="class_name" value="{{ monitor.config.class_name or 'person' }}"></label>
+    <label>Confidence
+      <input
+        name="confidence_threshold"
+        type="number"
+        min="0"
+        max="1"
+        step="0.05"
+        value="{{ monitor.config.confidence_threshold or 0.5 }}"
+      >
+    </label>
+    <button type="submit">Save Monitor</button>
+  </form>
+</section>
