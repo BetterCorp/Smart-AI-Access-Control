@@ -46,10 +46,11 @@ class Database:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 30000")
         try:
             yield conn
             conn.commit()
@@ -60,8 +61,9 @@ class Database:
             conn.close()
 
     def migrate(self) -> None:
-        with sqlite3.connect(self.path) as conn:
+        with sqlite3.connect(self.path, timeout=30) as conn:
             conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 30000")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -134,6 +136,14 @@ class Database:
                   path TEXT NOT NULL,
                   mime_type TEXT NOT NULL,
                   observed_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS monitor_runtime (
+                  monitor_id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  last_error TEXT,
+                  last_success_at TEXT,
+                  updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS worker_status (
@@ -213,7 +223,7 @@ class Database:
             for index in range(1, 5):
                 conn.execute(
                     """
-                    INSERT INTO relay_channels
+                    INSERT OR IGNORE INTO relay_channels
                       (id, board_id, channel_number, name, default_state, global_fail_state, current_state, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
@@ -379,10 +389,19 @@ class Repository:
                     now,
                 ),
             )
+            conn.execute(
+                """
+                INSERT INTO monitor_runtime (monitor_id, status, last_error, last_success_at, updated_at)
+                VALUES (?, 'configured', NULL, NULL, ?)
+                ON CONFLICT(monitor_id) DO NOTHING
+                """,
+                (monitor.id, now),
+            )
 
     def delete_monitor(self, monitor_id: str) -> None:
         with self.db.connect() as conn:
             conn.execute("DELETE FROM monitors WHERE id = ?", (monitor_id,))
+            conn.execute("DELETE FROM monitor_runtime WHERE monitor_id = ?", (monitor_id,))
 
     def record_observation(self, observation: Observation) -> None:
         if observation.monitor_id is None:
@@ -445,6 +464,50 @@ class Repository:
                 """
             ).fetchall()
 
+    def list_monitor_runtime_rows(self) -> list[sqlite3.Row]:
+        with self.db.connect() as conn:
+            return conn.execute(
+                """
+                SELECT
+                  monitors.id AS monitor_id,
+                  monitors.name AS monitor_name,
+                  monitors.model_id,
+                  monitors.camera_id,
+                  monitor_runtime.status,
+                  monitor_runtime.last_error,
+                  monitor_runtime.last_success_at,
+                  monitor_runtime.updated_at
+                FROM monitors
+                LEFT JOIN monitor_runtime ON monitor_runtime.monitor_id = monitors.id
+                ORDER BY monitors.name
+                """
+            ).fetchall()
+
+    def update_monitor_runtime(
+        self,
+        monitor_id: str,
+        status: str,
+        last_error: str | None = None,
+        last_success_at: str | None = None,
+    ) -> None:
+        now = utc_iso()
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO monitor_runtime (monitor_id, status, last_error, last_success_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(monitor_id) DO UPDATE SET
+                  status = excluded.status,
+                  last_error = excluded.last_error,
+                  last_success_at = COALESCE(excluded.last_success_at, monitor_runtime.last_success_at),
+                  updated_at = excluded.updated_at
+                WHERE monitor_runtime.status IS NOT excluded.status
+                   OR monitor_runtime.last_error IS NOT excluded.last_error
+                   OR excluded.last_success_at IS NOT NULL
+                """,
+                (monitor_id, status, last_error, last_success_at, now),
+            )
+
     def get_monitor_debug_snapshot(self, monitor_id: str) -> sqlite3.Row | None:
         with self.db.connect() as conn:
             return conn.execute(
@@ -484,6 +547,9 @@ class Repository:
             monitor_debug = conn.execute(
                 "SELECT COALESCE(MAX(observed_at), '') FROM monitor_debug_snapshots"
             ).fetchone()[0]
+            monitor_runtime = conn.execute(
+                "SELECT COALESCE(MAX(updated_at), '') FROM monitor_runtime"
+            ).fetchone()[0]
             events = conn.execute(
                 "SELECT COALESCE(MAX(created_at), '') || ':' || COUNT(*) FROM events"
             ).fetchone()[0]
@@ -501,14 +567,23 @@ class Repository:
             "monitor_debug": str(monitor_debug),
             "events": str(events),
             "relays": str(relays),
-            "health": "|".join(str(value) for value in [monitor_outputs, monitor_debug, events, relays, cameras, worker_status]),
+            "health": "|".join(
+                str(value)
+                for value in [monitor_outputs, monitor_debug, monitor_runtime, events, relays, cameras, worker_status]
+            ),
+            "monitors": str(monitor_runtime),
         }
 
     def set_camera_health(self, camera_id: str, health: str, last_error: str | None = None) -> None:
         with self.db.connect() as conn:
             conn.execute(
-                "UPDATE cameras SET health = ?, last_error = ?, updated_at = ? WHERE id = ?",
-                (health, last_error, utc_iso(), camera_id),
+                """
+                UPDATE cameras
+                SET health = ?, last_error = ?, updated_at = ?
+                WHERE id = ?
+                  AND (health IS NOT ? OR last_error IS NOT ?)
+                """,
+                (health, last_error, utc_iso(), camera_id, health, last_error),
             )
 
     def list_relays(self) -> list[RelayChannelConfig]:

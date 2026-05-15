@@ -121,6 +121,10 @@ class Worker:
             camera = camera_by_id.get(monitor.camera_id)
             if camera is None or not monitor.enabled:
                 observations_by_monitor[monitor.id] = []
+                self.repo.update_monitor_runtime(
+                    monitor.id,
+                    "disabled" if not monitor.enabled else "camera_missing",
+                )
                 continue
             try:
                 result = self.inference.result_for(monitor, camera)
@@ -131,10 +135,18 @@ class Worker:
                 if result.debug_jpeg is not None:
                     path = self.snapshot_store.write_monitor_debug_snapshot(monitor.id, result.debug_jpeg)
                     self.repo.save_monitor_debug_snapshot(monitor.id, path, datetime.now(timezone.utc))
+                self.repo.update_monitor_runtime(
+                    monitor.id,
+                    "online",
+                    last_success_at=datetime.now(timezone.utc).isoformat(),
+                )
                 self.repo.set_camera_health(camera.id, "online")
             except Exception as exc:
                 observations_by_monitor[monitor.id] = []
-                self.repo.set_camera_health(camera.id, "stream_error", str(exc))
+                error = str(exc)
+                status = "waiting" if error.startswith("Waiting for first Hailo frame") else "error"
+                self.repo.update_monitor_runtime(monitor.id, status, error)
+                self.repo.set_camera_health(camera.id, "stream_error", error)
 
         relay_commands: list[RelayCommand] = []
         for rule in self.repo.list_rules():

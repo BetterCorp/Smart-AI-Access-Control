@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import queue
 import signal
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from backend.app.camera.rtsp import build_rtsp_url
@@ -180,30 +182,36 @@ class HailoPipelineRunner:
     def _on_handoff(self, element: Any, buffer: Any, bindings: dict[str, Any]) -> None:
         try:
             hailo = bindings["hailo"]
-            cv2 = bindings["cv2"]
-            get_caps_from_pad = bindings["get_caps_from_pad"]
-            get_numpy_from_buffer = bindings["get_numpy_from_buffer"]
 
             roi = hailo.get_roi_from_buffer(buffer)
             hailo_detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
             detections = [detection_from_hailo(item) for item in hailo_detections]
             observations = observations_for(self.monitor, self.camera, detections)
-
-            debug_jpeg = None
-            pad = element.get_static_pad("sink")
-            if pad is not None:
-                frame_format, width, height = get_caps_from_pad(pad)
-                if frame_format is not None and width is not None and height is not None:
-                    frame = get_numpy_from_buffer(buffer, frame_format, width, height)
-                    if frame is not None:
-                        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                        ok, encoded = cv2.imencode(".jpg", bgr)
-                        if ok:
-                            debug_jpeg = encoded.tobytes()
-
+            debug_jpeg = self._build_debug_jpeg(element, buffer, bindings)
             self._publish("result", InferenceResult(observations, debug_jpeg=debug_jpeg))
         except Exception as exc:
             self._publish("error", str(exc))
+
+    def _build_debug_jpeg(self, element: Any, buffer: Any, bindings: dict[str, Any]) -> bytes | None:
+        try:
+            cv2 = bindings["cv2"]
+            get_caps_from_pad = bindings["get_caps_from_pad"]
+            get_numpy_from_buffer = bindings["get_numpy_from_buffer"]
+            pad = element.get_static_pad("sink")
+            if pad is None:
+                return None
+            frame_format, width, height = get_caps_from_pad(pad)
+            if frame_format is None or width is None or height is None:
+                return None
+            frame = get_numpy_from_buffer(buffer, frame_format, width, height)
+            if frame is None:
+                return None
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            ok, encoded = cv2.imencode(".jpg", bgr)
+            return encoded.tobytes() if ok else None
+        except Exception as exc:
+            self._publish("bus", f"Debug snapshot unavailable: {exc}")
+            return None
 
     def _on_bus_message(self, _bus: Any, message: Any, bindings: dict[str, Any]) -> None:
         Gst = bindings["Gst"]
@@ -376,12 +384,27 @@ def resolve_detection_resources(bindings: dict[str, Any]) -> HailoPipelineResour
             "Re-run setup so Hailo post-install completes."
         )
     labels_json = bindings["get_hef_labels_json"](hef_path)
+    ensure_readable_resource(hef_path, "Hailo detection model")
+    ensure_readable_resource(post_process_so, "Hailo detection post-process library")
+    if labels_json:
+        ensure_readable_resource(labels_json, "Hailo label metadata")
     return HailoPipelineResources(
         hef_path=str(hef_path),
         post_process_so=str(post_process_so),
         post_function_name=str(bindings["DETECTION_POSTPROCESS_FUNCTION"]),
         labels_json=str(labels_json) if labels_json else None,
     )
+
+
+def ensure_readable_resource(path: str | Path, label: str) -> None:
+    resource = Path(path)
+    if not resource.is_file():
+        raise RuntimeError(f"{label} is missing at '{resource}'. Re-run setup so Hailo resources are installed.")
+    if not os.access(resource, os.R_OK):
+        raise RuntimeError(
+            f"{label} is not readable by the worker at '{resource}'. "
+            "Re-run setup so Hailo resource permissions are repaired."
+        )
 
 
 def build_detection_pipeline(

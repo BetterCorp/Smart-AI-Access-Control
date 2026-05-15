@@ -93,3 +93,36 @@ def test_worker_status_is_persisted_and_changes_health_signature(tmp_path) -> No
     assert status["relay_hardware_enabled"] == 0
     assert status["relay_device_count"] == 4
     assert before["health"] != after["health"]
+
+
+def test_camera_health_only_updates_when_state_changes(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
+
+    repo.set_camera_health("cam-1", "online")
+    first = repo.list_camera_rows()[0]
+    repo.set_camera_health("cam-1", "online")
+    unchanged = repo.list_camera_rows()[0]
+    repo.set_camera_health("cam-1", "stream_error", "timeout")
+    changed = repo.list_camera_rows()[0]
+
+    assert unchanged["updated_at"] == first["updated_at"]
+    assert changed["updated_at"] != unchanged["updated_at"]
+
+
+def test_monitor_runtime_is_created_and_updated(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+
+    rows = repo.list_monitor_runtime_rows()
+    assert rows[0]["status"] == "configured"
+
+    before = repo.live_signatures()
+    repo.update_monitor_runtime("mon-1", "error", "stream failed")
+    after = repo.live_signatures()
+
+    rows = repo.list_monitor_runtime_rows()
+    assert rows[0]["status"] == "error"
+    assert rows[0]["last_error"] == "stream failed"
+    assert before["monitors"] != after["monitors"]

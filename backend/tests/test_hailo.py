@@ -3,11 +3,13 @@ import pytest
 
 from backend.app.inference.hailo import (
     HailoMonitorSession,
+    HailoPipelineRunner,
     HailoPipelineResources,
     build_detection_pipeline,
     build_rtsp_video_source_pipeline,
     format_child_exit,
     observations_for,
+    ensure_readable_resource,
     resolve_detection_resources,
 )
 
@@ -52,6 +54,13 @@ def test_hailo_resources_fail_cleanly_when_default_model_is_missing() -> None:
         )
 
 
+def test_hailo_resource_readability_is_checked(tmp_path) -> None:
+    missing = tmp_path / "missing.hef"
+
+    with pytest.raises(RuntimeError, match="Hailo detection model is missing"):
+        ensure_readable_resource(missing, "Hailo detection model")
+
+
 def test_hailo_session_reports_first_frame_timeout() -> None:
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     monitor = MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1")
@@ -92,3 +101,58 @@ def test_rtsp_source_pipeline_selects_video_media_only() -> None:
 
 def test_hailo_child_signal_exit_is_reported() -> None:
     assert format_child_exit(-11) == "Hailo pipeline process exited with SIGSEGV."
+
+
+def test_hailo_debug_snapshot_failure_does_not_drop_observations() -> None:
+    published: list[tuple[str, object]] = []
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    monitor = MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1")
+    runner = HailoPipelineRunner(monitor, camera, output_queue=None)
+    runner._publish = lambda kind, payload: published.append((kind, payload))
+
+    class FakeDetection:
+        def get_bbox(self):
+            return type("BBox", (), {"xmin": lambda self: 0.1, "ymin": lambda self: 0.1, "width": lambda self: 0.2, "height": lambda self: 0.5})()
+
+        def get_label(self):
+            return "person"
+
+        def get_confidence(self):
+            return 0.9
+
+    class FakeRoi:
+        def get_objects_typed(self, _kind):
+            return [FakeDetection()]
+
+    class FakeHailo:
+        HAILO_DETECTION = object()
+
+        @staticmethod
+        def get_roi_from_buffer(_buffer):
+            return FakeRoi()
+
+    class FakePad:
+        pass
+
+    class FakeElement:
+        @staticmethod
+        def get_static_pad(_name):
+            return FakePad()
+
+    runner._on_handoff(
+        element=FakeElement(),
+        buffer=None,
+        bindings={
+            "hailo": FakeHailo(),
+            "cv2": object(),
+            "get_caps_from_pad": lambda _pad: ("RGB", 640, 640),
+            "get_numpy_from_buffer": lambda *_args: (_ for _ in ()).throw(RuntimeError("snapshot failed")),
+        },
+    )
+
+    assert published[0] == ("bus", "Debug snapshot unavailable: snapshot failed")
+    assert published[1][0] == "result"
+    assert [(item.metric, item.value) for item in published[1][1].observations] == [
+        ("person.count", 1),
+        ("person.present", True),
+    ]

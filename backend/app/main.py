@@ -138,6 +138,7 @@ def monitors_page(request: Request) -> HTMLResponse:
             "models": model_options(),
             "monitor_states": repo.list_monitor_states(),
             "monitor_debug_snapshots": repo.list_monitor_debug_snapshots(),
+            "monitor_runtime_rows": repo.list_monitor_runtime_rows(),
             "inference_mode": "mock" if settings.use_mock_inference else "real",
         },
     )
@@ -152,6 +153,7 @@ def monitors_table(request: Request) -> HTMLResponse:
             "monitors": repo.list_monitors(),
             "monitor_states": repo.list_monitor_states(),
             "monitor_debug_snapshots": repo.list_monitor_debug_snapshots(),
+            "monitor_runtime_rows": repo.list_monitor_runtime_rows(),
         },
     )
 
@@ -541,11 +543,11 @@ def health_panel(request: Request) -> HTMLResponse:
 @app.get("/api/live/stream")
 async def live_stream() -> StreamingResponse:
     async def event_stream():
-        previous = repo.live_signatures()
+        previous = await asyncio.to_thread(repo.live_signatures)
         yield sse_message("ready", {"ok": True})
         while True:
             await asyncio.sleep(1)
-            current = repo.live_signatures()
+            current = await asyncio.to_thread(repo.live_signatures)
             for event_name, signature in current.items():
                 if signature != previous.get(event_name):
                     yield sse_message(event_name, {"changed": True})

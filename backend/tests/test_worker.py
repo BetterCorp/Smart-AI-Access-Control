@@ -138,3 +138,26 @@ def test_worker_stores_monitor_debug_snapshot(tmp_path) -> None:
     rows = repo.list_monitor_debug_snapshots()
     assert len(rows) == 1
     assert rows[0]["monitor_id"] == "mon-1"
+
+
+class FailingInferenceProvider:
+    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
+        raise RuntimeError("Waiting for first Hailo frame from the RTSP pipeline (1s).")
+
+
+def test_worker_records_waiting_monitor_runtime(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    repo.save_camera(camera)
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        FailingInferenceProvider(),
+    )
+
+    worker.process_once()
+
+    rows = repo.list_monitor_runtime_rows()
+    assert rows[0]["status"] == "waiting"
+    assert rows[0]["last_error"].startswith("Waiting for first Hailo frame")

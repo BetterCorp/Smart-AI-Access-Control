@@ -1,13 +1,17 @@
-<section id="monitors-table" class="panel">
+<section id="monitors-table" class="panel live-fragment" data-live-event="monitors" data-live-url="/ui/monitors/table">
   <h3>Configured AI Monitors</h3>
   <table>
-    <thead><tr><th>Name</th><th>Model</th><th>Camera</th><th>Config</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Model</th><th>Camera</th><th>Status</th><th>Last Error</th><th>Last Success</th><th>Config</th><th></th></tr></thead>
     <tbody>
       {% for monitor in monitors %}
       <tr>
         <td>{{ monitor.name }}</td>
         <td>{{ monitor.model_id }}</td>
         <td>{{ monitor.camera_id }}</td>
+        {% set runtime = monitor_runtime_rows|selectattr("monitor_id", "equalto", monitor.id)|first %}
+        <td>{{ runtime.status if runtime and runtime.status else "configured" }}</td>
+        <td>{{ runtime.last_error if runtime and runtime.last_error else "" }}</td>
+        <td>{{ runtime.last_success_at if runtime and runtime.last_success_at else "" }}</td>
         <td><code>{{ monitor.config }}</code></td>
         <td>
           <button hx-get="/ui/monitors/{{ monitor.id }}/edit" hx-target="#monitor-edit-slot" hx-swap="innerHTML">Edit</button>
@@ -15,7 +19,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5">No monitors configured.</td></tr>
+      <tr><td colspan="8">No monitors configured.</td></tr>
       {% endfor %}
     </tbody>
   </table>

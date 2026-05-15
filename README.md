@@ -87,6 +87,7 @@ Deployment is split into two scripts:
 - install Node.js/npm and build TypeScript assets from source,
 - install the Debian `usbrelay` CLI used by the relay driver,
 - install systemd services,
+- serve the web API with two Uvicorn worker processes,
 - install the USB relay udev rule,
 - expose the app directly on `0.0.0.0:8000`,
 - optionally configure UFW,
