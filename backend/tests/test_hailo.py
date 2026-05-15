@@ -5,6 +5,7 @@ from backend.app.inference.hailo import (
     HailoMonitorSession,
     HailoPipelineResources,
     build_detection_pipeline,
+    build_rtsp_video_source_pipeline,
     format_child_exit,
     observations_for,
     resolve_detection_resources,
@@ -64,7 +65,6 @@ def test_hailo_session_reports_first_frame_timeout() -> None:
 
 def test_hailo_pipeline_keeps_callback_before_headless_sink() -> None:
     bindings = {
-        "SOURCE_PIPELINE": lambda *_args, **_kwargs: "source",
         "INFERENCE_PIPELINE": lambda **_kwargs: "inference",
         "INFERENCE_PIPELINE_WRAPPER": lambda inner: f"wrapped({inner})",
         "TRACKER_PIPELINE": lambda class_id: f"tracker({class_id})",
@@ -80,6 +80,14 @@ def test_hailo_pipeline_keeps_callback_before_headless_sink() -> None:
 
     assert "identity name=identity_callback ! videoconvert" in pipeline
     assert "hailooverlay" not in pipeline
+
+
+def test_rtsp_source_pipeline_selects_video_media_only() -> None:
+    pipeline = build_rtsp_video_source_pipeline("rtsp://camera/live", analytics_fps=2)
+
+    assert 'rtspsrc location="rtsp://camera/live"' in pipeline
+    assert "application/x-rtp,media=video" in pipeline
+    assert 'caps="video/x-raw,framerate=2/1"' in pipeline
 
 
 def test_hailo_child_signal_exit_is_reported() -> None:

@@ -312,7 +312,6 @@ def load_hailo_bindings() -> dict[str, Any]:
         from hailo_apps.python.core.gstreamer.gstreamer_helper_pipelines import (
             INFERENCE_PIPELINE,
             INFERENCE_PIPELINE_WRAPPER,
-            SOURCE_PIPELINE,
             TRACKER_PIPELINE,
             USER_CALLBACK_PIPELINE,
         )
@@ -344,7 +343,6 @@ def load_hailo_bindings() -> dict[str, Any]:
         "RESOURCES_SO_DIR_NAME": RESOURCES_SO_DIR_NAME,
         "get_hef_labels_json": get_hef_labels_json,
         "detect_hailo_arch": detect_hailo_arch,
-        "SOURCE_PIPELINE": SOURCE_PIPELINE,
         "INFERENCE_PIPELINE": INFERENCE_PIPELINE,
         "INFERENCE_PIPELINE_WRAPPER": INFERENCE_PIPELINE_WRAPPER,
         "TRACKER_PIPELINE": TRACKER_PIPELINE,
@@ -392,13 +390,7 @@ def build_detection_pipeline(
     resources: HailoPipelineResources,
     analytics_fps: int,
 ) -> str:
-    source = bindings["SOURCE_PIPELINE"](
-        rtsp_url,
-        video_width=640,
-        video_height=640,
-        frame_rate=analytics_fps,
-        sync=True,
-    )
+    source = build_rtsp_video_source_pipeline(rtsp_url, analytics_fps)
     inference = bindings["INFERENCE_PIPELINE"](
         hef_path=resources.hef_path,
         post_process_so=resources.post_process_so,
@@ -422,4 +414,19 @@ def build_detection_pipeline(
         "videoconvert ! "
         "video/x-raw,format=RGB ! "
         "fakesink sync=false"
+    )
+
+
+def build_rtsp_video_source_pipeline(rtsp_url: str, analytics_fps: int) -> str:
+    return (
+        f'rtspsrc location="{rtsp_url}" latency=100 name=source ! '
+        "application/x-rtp,media=video ! "
+        "queue name=source_queue_decode leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+        "decodebin name=source_decodebin ! "
+        "queue name=source_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+        "videoscale name=source_videoscale n-threads=2 ! "
+        "queue name=source_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+        "videoconvert n-threads=3 name=source_convert qos=false ! "
+        "video/x-raw,pixel-aspect-ratio=1/1,format=RGB,width=640,height=640 ! "
+        f'videorate name=source_videorate ! capsfilter name=source_fps_caps caps="video/x-raw,framerate={analytics_fps}/1"'
     )

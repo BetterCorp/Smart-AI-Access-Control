@@ -53,6 +53,7 @@ apt_install() {
     packages+=(
       dkms
       hailo-all
+      gir1.2-gtk-3.0
       python3-gi
       python3-gi-cairo
       gir1.2-gstreamer-1.0
