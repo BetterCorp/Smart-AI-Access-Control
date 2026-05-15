@@ -33,8 +33,16 @@ apt_install() {
     ca-certificates
     curl
     git
+    libbz2-dev
+    libdw-dev
+    libelf-dev
+    liblzma-dev
+    libunwind-dev
+    meson
+    ninja-build
     nodejs
     npm
+    portaudio19-dev
     python3-pip
     python3-venv
     usbrelay

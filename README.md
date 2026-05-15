@@ -79,7 +79,7 @@ Deployment is split into two scripts:
 - `scripts/pi-setup.sh` is the small bootstrap entrypoint. It installs the minimum packages, syncs the requested Git branch, then runs the checked-out latest `pi-sync.sh`.
 - `scripts/pi-sync.sh` is the full idempotent install/update worker. It will:
 
-- install required apt packages,
+- install required apt packages, including the native Hailo post-process build dependencies,
 - create the `smartai` service user,
 - create `/var/lib/smartai` for the SQLite DB and snapshots,
 - clone or update the repo at `/opt/smart-ai-access-control`,
