@@ -1,0 +1,11 @@
+*.sh text eol=lf
+*.service text eol=lf
+deploy/udev/*.rules text eol=lf
+deploy/caddy/Caddyfile text eol=lf
+*.py text eol=lf
+*.ts text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.json text eol=lf

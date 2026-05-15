@@ -37,7 +37,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 @app.middleware("http")
 async def require_auth(request: Request, call_next):
     path = request.url.path
-    public = path.startswith("/static") or path in {"/login", "/bootstrap"}
+    public = path.startswith("/static") or path in {"/login", "/bootstrap", "/healthz"}
     if public:
         return await call_next(request)
     if not repo.is_bootstrapped():
@@ -339,6 +339,11 @@ def health() -> dict[str, object]:
         "db": str(settings.db_path),
         "pid": os.getpid(),
     }
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, object]:
+    return {"ok": True}
 
 
 @app.get("/ui/system/health", response_class=HTMLResponse)

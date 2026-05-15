@@ -1,18 +1,188 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sudo apt update
-sudo apt install -y python3-venv python3-pip dkms hailo-all rpicam-apps caddy git ufw
+REPO_URL="${SMARTAI_REPO_URL:-git@github.com:BetterCorp/Smart-AI-Access-Control.git}"
+BRANCH="${SMARTAI_BRANCH:-main}"
+APP_DIR="${SMARTAI_APP_DIR:-/opt/smart-ai-access-control}"
+DATA_DIR="${SMARTAI_DATA_DIR:-/var/lib/smartai}"
+DOMAIN="${SMARTAI_DOMAIN:-smartai.local}"
+MOCK_INFERENCE="${SMARTAI_MOCK_INFERENCE:-1}"
+ENABLE_RELAY_HARDWARE="${SMARTAI_ENABLE_RELAY_HARDWARE:-0}"
+ENABLE_HAILO_PACKAGES="${SMARTAI_ENABLE_HAILO_PACKAGES:-1}"
+ENABLE_UFW="${SMARTAI_ENABLE_UFW:-1}"
+SERVICE_USER="${SMARTAI_SERVICE_USER:-smartai}"
+SERVICE_GROUP="${SMARTAI_SERVICE_GROUP:-smartai}"
 
-sudo useradd --system --create-home --home-dir /var/lib/smartai --shell /usr/sbin/nologin smartai || true
-sudo mkdir -p /opt/smart-ai-access-control /var/lib/smartai/snapshots
-sudo chown -R smartai:smartai /var/lib/smartai
-sudo ufw allow OpenSSH || true
-sudo ufw allow 443/tcp || true
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Run as root so this works both from a file and from curl | bash:" >&2
+  echo "  curl -fsSL https://raw.githubusercontent.com/BetterCorp/Smart-AI-Access-Control/main/scripts/pi-setup.sh | sudo bash" >&2
+  echo "or:" >&2
+  echo "  sudo scripts/pi-setup.sh" >&2
+  exit 1
+fi
 
-echo "Copy the repository to /opt/smart-ai-access-control, then run:"
-echo "  python3 -m venv /opt/smart-ai-access-control/.venv"
-echo "  /opt/smart-ai-access-control/.venv/bin/pip install -e /opt/smart-ai-access-control"
-echo "  sudo cp deploy/systemd/*.service /etc/systemd/system/"
-echo "  sudo cp deploy/udev/99-usbrelay.rules /etc/udev/rules.d/"
-echo "  sudo systemctl daemon-reload && sudo systemctl enable --now smartai-api"
+log() {
+  printf '\n==> %s\n' "$*"
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+apt_install() {
+  local packages=(
+    ca-certificates
+    caddy
+    curl
+    git
+    python3-pip
+    python3-venv
+    ufw
+  )
+
+  if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
+    packages+=(dkms hailo-all rpicam-apps)
+  fi
+
+  log "Installing system packages"
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+}
+
+ensure_user_and_dirs() {
+  log "Creating service user and data directories"
+  if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
+    useradd --system --create-home --home-dir "${DATA_DIR}" --shell /usr/sbin/nologin "${SERVICE_USER}"
+  fi
+
+  install -d -o root -g root -m 0755 "$(dirname "${APP_DIR}")"
+  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" -m 0750 "${DATA_DIR}"
+  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" -m 0750 "${DATA_DIR}/snapshots"
+}
+
+sync_repo() {
+  log "Syncing repository ${REPO_URL} (${BRANCH})"
+  require_command git
+
+  if [[ -d "${APP_DIR}/.git" ]]; then
+    if git -C "${APP_DIR}" remote get-url origin >/dev/null 2>&1; then
+      git -C "${APP_DIR}" remote set-url origin "${REPO_URL}"
+    else
+      git -C "${APP_DIR}" remote add origin "${REPO_URL}"
+    fi
+    git -C "${APP_DIR}" fetch origin "${BRANCH}"
+    git -C "${APP_DIR}" checkout "${BRANCH}"
+    git -C "${APP_DIR}" reset --hard "origin/${BRANCH}"
+  elif [[ -d "${APP_DIR}" ]] && find "${APP_DIR}" -mindepth 1 -maxdepth 1 | read -r; then
+    echo "${APP_DIR} exists and is not an empty git checkout. Aborting." >&2
+    echo "Move it aside or set SMARTAI_APP_DIR to another path." >&2
+    exit 1
+  else
+    git clone --branch "${BRANCH}" "${REPO_URL}" "${APP_DIR}"
+  fi
+
+  chown -R root:root "${APP_DIR}"
+}
+
+install_python_app() {
+  log "Installing Python application"
+  python3 -m venv "${APP_DIR}/.venv"
+  "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip
+  "${APP_DIR}/.venv/bin/pip" install -e "${APP_DIR}"
+}
+
+install_node_assets_if_available() {
+  if ! command -v npm >/dev/null 2>&1; then
+    log "npm not found; using committed static assets"
+    return
+  fi
+
+  log "Building TypeScript assets"
+  npm --prefix "${APP_DIR}" ci
+  npm --prefix "${APP_DIR}" run build
+  rm -rf "${APP_DIR}/node_modules"
+}
+
+install_systemd() {
+  log "Installing systemd services"
+  install -m 0644 "${APP_DIR}/deploy/systemd/smartai-api.service" /etc/systemd/system/smartai-api.service
+  install -m 0644 "${APP_DIR}/deploy/systemd/smartai-worker.service" /etc/systemd/system/smartai-worker.service
+
+  mkdir -p /etc/systemd/system/smartai-worker.service.d
+  cat >/etc/systemd/system/smartai-worker.service.d/override.conf <<EOF
+[Service]
+Environment=SMARTAI_MOCK_INFERENCE=${MOCK_INFERENCE}
+Environment=SMARTAI_ENABLE_RELAY_HARDWARE=${ENABLE_RELAY_HARDWARE}
+EOF
+
+  systemctl daemon-reload
+  systemctl enable smartai-api.service smartai-worker.service
+  systemctl restart smartai-api.service smartai-worker.service
+}
+
+install_caddy() {
+  log "Installing Caddy reverse proxy"
+  cat >/etc/caddy/Caddyfile <<EOF
+${DOMAIN} {
+  reverse_proxy 127.0.0.1:8000
+}
+EOF
+  systemctl enable caddy
+  systemctl reload caddy || systemctl restart caddy
+}
+
+install_udev() {
+  log "Installing USB relay udev rule"
+  install -m 0644 "${APP_DIR}/deploy/udev/99-usbrelay.rules" /etc/udev/rules.d/99-usbrelay.rules
+  udevadm control --reload-rules
+  udevadm trigger || true
+}
+
+configure_firewall() {
+  if [[ "${ENABLE_UFW}" != "1" ]]; then
+    return
+  fi
+
+  log "Configuring firewall"
+  ufw allow OpenSSH
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+  ufw --force enable
+}
+
+verify_install() {
+  log "Verifying local API"
+  curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8000/healthz >/dev/null || {
+    echo "API health check failed. Recent service logs:" >&2
+    journalctl -u smartai-api.service -n 80 --no-pager >&2 || true
+    exit 1
+  }
+
+  if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]] && command -v hailortcli >/dev/null 2>&1; then
+    log "Checking Hailo device visibility"
+    hailortcli fw-control identify || true
+  fi
+}
+
+main() {
+  apt_install
+  ensure_user_and_dirs
+  sync_repo
+  install_python_app
+  install_node_assets_if_available
+  install_udev
+  install_systemd
+  install_caddy
+  configure_firewall
+  verify_install
+
+  log "Setup complete"
+  echo "Open: https://${DOMAIN}"
+  echo "First-run admin setup: https://${DOMAIN}/bootstrap"
+  echo "Local fallback: http://127.0.0.1:8000"
+}
+
+main "$@"
