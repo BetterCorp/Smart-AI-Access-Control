@@ -49,6 +49,6 @@ An inference provider returns `InferenceResult`, which contains typed observatio
 
 Development uses `MockInferenceProvider`, which produces deterministic person counts for tests and local runs.
 
-Production inference should be implemented behind `backend.app.inference.hailo.HailoRtspAdapter`. That adapter must translate Hailo/GStreamer detection metadata into the shared `Observation` type. The rest of the system does not need to know whether observations came from mock inference, Hailo, or a future plugin.
+Production person counting is implemented behind `backend.app.inference.hailo.HailoGStreamerProvider`. It starts one background RTSP/GStreamer session per active person monitor, translates Hailo detection metadata into the shared `Observation` type, and exposes the latest result to the worker loop. The rest of the system does not need to know whether observations came from mock inference, Hailo, or a future plugin.
 
-The first hardware validation target is one RTSP camera at low resolution with `max-buffers=1` and `drop=true`. Scale to more cameras only after measuring decode load, Hailo latency, CPU temperature, and memory pressure.
+The first hardware validation target is one RTSP camera at low resolution and 1-5 analytics FPS. Scale to more cameras only after measuring decode load, Hailo latency, CPU temperature, and memory pressure.

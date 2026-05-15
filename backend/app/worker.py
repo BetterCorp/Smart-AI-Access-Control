@@ -25,6 +25,7 @@ from backend.app.domain import (
     SnapshotDelivery,
     WebhookAction,
 )
+from backend.app.inference.hailo import HailoGStreamerProvider
 from backend.app.plugins.object_count import ObjectCountConfig, ObjectCountPlugin
 from backend.app.relay.service import RelayArbiter, RelayCommand, RelayConflictError, UsbRelayDriver
 from backend.app.rules.engine import RuleEngine
@@ -77,13 +78,6 @@ class MockInferenceProvider:
                 )
                 for observation in observations
             ]
-        )
-
-
-class HailoGStreamerProvider:
-    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
-        raise RuntimeError(
-            "Hailo provider is not wired in this environment. Set SMARTAI_MOCK_INFERENCE=1 or implement the Pi GStreamer adapter."
         )
 
 

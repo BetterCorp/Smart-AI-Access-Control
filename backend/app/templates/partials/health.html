@@ -14,3 +14,18 @@
   <dt>Relay hardware</dt><dd>{{ health.relayHardware if health.relayHardware is not none else "unknown" }}</dd>
   <dt>Database</dt><dd><code>{{ health.db }}</code></dd>
 </dl>
+{% if health.cameraFaultDetails %}
+<h4>Camera Faults</h4>
+<table>
+  <thead><tr><th>Camera</th><th>Health</th><th>Last Error</th></tr></thead>
+  <tbody>
+    {% for fault in health.cameraFaultDetails %}
+    <tr>
+      <td>{{ fault.name }}</td>
+      <td>{{ fault.health }}</td>
+      <td>{{ fault.lastError or "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

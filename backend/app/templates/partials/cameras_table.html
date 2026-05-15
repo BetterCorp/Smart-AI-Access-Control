@@ -1,20 +1,22 @@
 <section id="camera-table" class="panel">
   <h3>Configured Cameras</h3>
   <table>
-    <thead><tr><th>Name</th><th>Host</th><th>FPS</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Name</th><th>Host</th><th>FPS</th><th>Health</th><th>Last Error</th><th>Actions</th></tr></thead>
     <tbody>
       {% for camera in cameras %}
       <tr>
-        <td>{{ camera.name }}</td>
-        <td>{{ camera.host }}:{{ camera.port }}</td>
-        <td>{{ camera.analytics_fps }}</td>
+        <td>{{ camera["name"] }}</td>
+        <td>{{ camera["host"] }}:{{ camera["port"] }}</td>
+        <td>{{ camera["analytics_fps"] }}</td>
+        <td>{{ camera["health"] }}</td>
+        <td>{{ camera["last_error"] or "" }}</td>
         <td>
-          <button hx-post="/ui/cameras/{{ camera.id }}/test" hx-target="#camera-test-result">Test</button>
-          <button hx-post="/ui/cameras/{{ camera.id }}/delete" hx-target="#camera-table" hx-swap="outerHTML">Delete</button>
+          <button hx-post="/ui/cameras/{{ camera['id'] }}/test" hx-target="#camera-test-result">Test</button>
+          <button hx-post="/ui/cameras/{{ camera['id'] }}/delete" hx-target="#camera-table" hx-swap="outerHTML">Delete</button>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="4">No cameras configured.</td></tr>
+      <tr><td colspan="6">No cameras configured.</td></tr>
       {% endfor %}
     </tbody>
   </table>

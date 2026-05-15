@@ -8,6 +8,7 @@ DATA_DIR="${SMARTAI_DATA_DIR:-/var/lib/smartai}"
 MOCK_INFERENCE="${SMARTAI_MOCK_INFERENCE:-1}"
 ENABLE_RELAY_HARDWARE="${SMARTAI_ENABLE_RELAY_HARDWARE:-0}"
 ENABLE_HAILO_PACKAGES="${SMARTAI_ENABLE_HAILO_PACKAGES:-1}"
+HAILO_APPS_REF="${SMARTAI_HAILO_APPS_REF:-main}"
 ENABLE_UFW="${SMARTAI_ENABLE_UFW:-1}"
 SERVICE_USER="${SMARTAI_SERVICE_USER:-smartai}"
 SERVICE_GROUP="${SMARTAI_SERVICE_GROUP:-smartai}"
@@ -90,6 +91,10 @@ install_python_app() {
   python3 -m venv "${APP_DIR}/.venv"
   "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip
   "${APP_DIR}/.venv/bin/pip" install -e "${APP_DIR}"
+  if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
+    log "Installing official Hailo Apps Python package"
+    "${APP_DIR}/.venv/bin/pip" install "hailo-apps @ git+https://github.com/hailo-ai/hailo-apps.git@${HAILO_APPS_REF}"
+  fi
 }
 
 install_node_assets_if_available() {

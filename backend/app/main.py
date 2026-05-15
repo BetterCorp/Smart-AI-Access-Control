@@ -273,12 +273,12 @@ def monitor_debug_snapshot(monitor_id: str) -> FileResponse:
 
 @app.get("/cameras", response_class=HTMLResponse)
 def cameras_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "pages/cameras.html", {"cameras": repo.list_cameras()})
+    return templates.TemplateResponse(request, "pages/cameras.html", {"cameras": repo.list_camera_rows()})
 
 
 @app.get("/ui/cameras/table", response_class=HTMLResponse)
 def cameras_table(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "partials/cameras_table.html", {"cameras": repo.list_cameras()})
+    return templates.TemplateResponse(request, "partials/cameras_table.html", {"cameras": repo.list_camera_rows()})
 
 
 @app.post("/ui/cameras", response_class=HTMLResponse)
@@ -505,6 +505,14 @@ def health() -> dict[str, object]:
         "ok": worker_status is not None and not camera_faults,
         "cameras": len(camera_rows),
         "cameraFaults": len(camera_faults),
+        "cameraFaultDetails": [
+            {
+                "name": row["name"],
+                "health": row["health"],
+                "lastError": row["last_error"],
+            }
+            for row in camera_faults
+        ],
         "monitors": len(repo.list_monitors()),
         "rules": len(repo.list_rules()),
         "relays": len(repo.list_relays()),

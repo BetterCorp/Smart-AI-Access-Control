@@ -8,7 +8,7 @@ This first implementation is a working scaffold:
 - SQLite persistence for admin sessions, cameras, AI monitors, relays, rules, events, and settings.
 - Dependency-light core domain services for rules, relays, storage, webhooks, and RTSP URL building.
 - Plugin-ready AI monitor shape with initial person counting and weapon visibility monitor definitions.
-- Worker loop with mockable inference, snapshot event creation, relay arbitration, and webhook dispatch.
+- Worker loop with mockable inference, a Raspberry Pi Hailo person-counting path, snapshot event creation, relay arbitration, and webhook dispatch.
 - Raspberry Pi deployment notes and verification scripts.
 - Focused tests for the safety-critical logic.
 
@@ -57,6 +57,8 @@ Use mock inference during development. On the Pi, the relay hardware is only dri
 
 When mock inference is enabled, AI monitor values are simulated and do not come from live camera frames. The Monitors page states the active inference mode and exposes live metric updates plus debug-snapshot slots for real providers.
 
+In real inference mode, `Person Counter` uses the official Hailo detection resources and writes live debug snapshots from the analyzed frame. `Weapon Visibility` still requires a dedicated custom detector before it can run against real camera frames.
+
 ## Raspberry Pi Target
 
 Use Raspberry Pi OS Lite 64-bit on the Pi 5. Install the Hailo stack with Raspberry Pi packages, verify with `hailortcli fw-control identify`, then run the app as systemd services using the templates under `deploy/`.
@@ -84,6 +86,7 @@ The installer is idempotent. Run the same command for a fresh install or to upda
 - optionally configure UFW,
 - restart services,
 - verify `http://127.0.0.1:8000/healthz`.
+- install the official `hailo-apps` Python package used by the real person-counting provider when Hailo support is enabled.
 
 Fresh install or update from GitHub:
 
@@ -118,6 +121,7 @@ sudo env \
   SMARTAI_MOCK_INFERENCE=1 \
   SMARTAI_ENABLE_RELAY_HARDWARE=0 \
   SMARTAI_ENABLE_HAILO_PACKAGES=1 \
+  SMARTAI_HAILO_APPS_REF=main \
   SMARTAI_ENABLE_UFW=1 \
   /opt/smart-ai-access-control/scripts/pi-setup.sh
 ```
@@ -142,6 +146,8 @@ Production switchovers after hardware validation:
 ```bash
 sudo env SMARTAI_MOCK_INFERENCE=0 SMARTAI_ENABLE_RELAY_HARDWARE=1 /opt/smart-ai-access-control/scripts/pi-setup.sh
 ```
+
+After switching to real inference, the Cameras page shows the last stream/provider error for each camera. A working person monitor should move from `stream_error` to `online`, publish live metrics on the Monitors page, and begin producing debug snapshots.
 
 ## License
 
