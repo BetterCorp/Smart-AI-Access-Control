@@ -499,9 +499,12 @@ def update_storage(
 @app.get("/api/system/health")
 def health() -> dict[str, object]:
     worker_status = repo.get_worker_status()
+    camera_rows = repo.list_camera_rows()
+    camera_faults = [row for row in camera_rows if row["health"] in {"stream_error", "auth_failed"}]
     return {
-        "ok": True,
-        "cameras": len(repo.list_cameras()),
+        "ok": worker_status is not None and not camera_faults,
+        "cameras": len(camera_rows),
+        "cameraFaults": len(camera_faults),
         "monitors": len(repo.list_monitors()),
         "rules": len(repo.list_rules()),
         "relays": len(repo.list_relays()),

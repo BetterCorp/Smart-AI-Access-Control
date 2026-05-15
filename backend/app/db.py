@@ -291,6 +291,10 @@ class Repository:
             rows = conn.execute("SELECT * FROM cameras ORDER BY name").fetchall()
         return [camera_from_row(row) for row in rows]
 
+    def list_camera_rows(self) -> list[sqlite3.Row]:
+        with self.db.connect() as conn:
+            return conn.execute("SELECT * FROM cameras ORDER BY name").fetchall()
+
     def get_camera(self, camera_id: str) -> CameraConfig | None:
         with self.db.connect() as conn:
             row = conn.execute("SELECT * FROM cameras WHERE id = ?", (camera_id,)).fetchone()
