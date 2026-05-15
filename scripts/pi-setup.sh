@@ -12,6 +12,7 @@ HAILO_APPS_REF="${SMARTAI_HAILO_APPS_REF:-main}"
 ENABLE_UFW="${SMARTAI_ENABLE_UFW:-1}"
 SERVICE_USER="${SMARTAI_SERVICE_USER:-smartai}"
 SERVICE_GROUP="${SMARTAI_SERVICE_GROUP:-smartai}"
+SETUP_REEXECUTED="${SMARTAI_SETUP_REEXECUTED:-0}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root so this works both from a file and from curl | bash:" >&2
@@ -61,15 +62,44 @@ apt_install() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
 }
 
+bootstrap_install() {
+  log "Installing bootstrap packages"
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git
+}
+
+ensure_app_parent_dir() {
+  install -d -o root -g root -m 0755 "$(dirname "${APP_DIR}")"
+}
+
 ensure_user_and_dirs() {
   log "Creating service user and data directories"
   if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
     useradd --system --create-home --home-dir "${DATA_DIR}" --shell /usr/sbin/nologin "${SERVICE_USER}"
   fi
 
-  install -d -o root -g root -m 0755 "$(dirname "${APP_DIR}")"
+  ensure_app_parent_dir
   install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" -m 0750 "${DATA_DIR}"
   install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" -m 0750 "${DATA_DIR}/snapshots"
+}
+
+bootstrap_latest_script() {
+  if [[ "${SETUP_REEXECUTED}" == "1" ]]; then
+    return
+  fi
+
+  bootstrap_install
+  ensure_app_parent_dir
+  sync_repo
+
+  if [[ ! -x "${APP_DIR}/scripts/pi-setup.sh" ]]; then
+    echo "Latest setup script not found at ${APP_DIR}/scripts/pi-setup.sh" >&2
+    exit 1
+  fi
+
+  log "Re-executing latest checked-out setup script"
+  export SMARTAI_SETUP_REEXECUTED=1
+  exec "${APP_DIR}/scripts/pi-setup.sh"
 }
 
 sync_repo() {
@@ -199,9 +229,9 @@ verify_install() {
 }
 
 main() {
+  bootstrap_latest_script
   apt_install
   ensure_user_and_dirs
-  sync_repo
   install_python_app
   verify_hailo_python
   install_node_assets

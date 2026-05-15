@@ -76,6 +76,7 @@ Recommended base image:
 
 The installer is idempotent. Run the same command for a fresh install or to update an existing install. It will:
 
+- install the minimum bootstrap packages, sync the requested Git branch, and re-exec the checked-out latest setup script once before the full install begins,
 - install required apt packages,
 - create the `smartai` service user,
 - create `/var/lib/smartai` for the SQLite DB and snapshots,
@@ -117,6 +118,8 @@ Run again any time to pull and apply the latest code:
 ```bash
 sudo /opt/smart-ai-access-control/scripts/pi-setup.sh
 ```
+
+Local runs are safe after the bootstrap behavior is present: the script updates the repo first and then re-executes the newly checked-out script before continuing, so it does not keep running stale installer logic after a pull.
 
 Useful installer overrides:
 
