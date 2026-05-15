@@ -62,14 +62,25 @@ class UsbRelayDriver:
     def __init__(self, executable: str = "usbrelay") -> None:
         self.executable = executable
 
-    def device_count(self) -> int:
+    def list_channels(self) -> list[str]:
         try:
             result = subprocess.run([self.executable], check=True, capture_output=True, text=True)
         except (FileNotFoundError, subprocess.CalledProcessError):
-            return 0
-        return sum(1 for line in result.stdout.splitlines() if line.strip())
+            return []
+        return [line.split("=", 1)[0].strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def device_count(self) -> int:
+        return len(self.list_channels())
 
     def set_channel(self, board_id: str, channel_number: int, state: RelayDesiredState) -> None:
         value = "1" if state == RelayDesiredState.ON else "0"
-        target = f"{board_id}_{channel_number}={value}"
+        target = f"{self._resolve_board_id(board_id)}_{channel_number}={value}"
         subprocess.run([self.executable, target], check=True)
+
+    def _resolve_board_id(self, board_id: str) -> str:
+        if board_id != "board-1":
+            return board_id
+        detected_board_ids = {channel.rsplit("_", 1)[0] for channel in self.list_channels() if "_" in channel}
+        if len(detected_board_ids) == 1:
+            return next(iter(detected_board_ids))
+        return board_id

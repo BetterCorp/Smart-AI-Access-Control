@@ -41,6 +41,7 @@ apt_install() {
     npm
     python3-pip
     python3-venv
+    usbrelay
     ufw
   )
 
@@ -118,6 +119,8 @@ install_python_app() {
   if [[ "${ENABLE_HAILO_PACKAGES}" == "1" ]]; then
     log "Installing official Hailo Apps Python package"
     "${APP_DIR}/.venv/bin/pip" install "hailo-apps @ git+https://github.com/hailo-ai/hailo-apps.git@${HAILO_APPS_REF}"
+    log "Preparing Hailo detection resources"
+    "${APP_DIR}/.venv/bin/hailo-post-install" --group detection
   fi
 }
 

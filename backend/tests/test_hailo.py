@@ -1,5 +1,7 @@
 from backend.app.domain import CameraConfig, Detection, MonitorConfig
-from backend.app.inference.hailo import observations_for
+import pytest
+
+from backend.app.inference.hailo import observations_for, resolve_detection_resources
 
 
 def test_hailo_observations_include_monitor_identity() -> None:
@@ -27,3 +29,16 @@ def test_hailo_observations_include_monitor_identity() -> None:
     ]
     assert all(item.monitor_id == "mon-1" for item in observations)
     assert all(item.model_id == "person_counter" for item in observations)
+
+
+def test_hailo_resources_fail_cleanly_when_default_model_is_missing() -> None:
+    with pytest.raises(RuntimeError, match="No default Hailo detection model"):
+        resolve_detection_resources(
+            {
+                "load_environment": lambda _path: None,
+                "DEFAULT_DOTENV_PATH": "/tmp/.env",
+                "detect_hailo_arch": lambda: "hailo8l",
+                "resolve_hef_path": lambda *_args, **_kwargs: None,
+                "DETECTION_PIPELINE": "detection",
+            }
+        )

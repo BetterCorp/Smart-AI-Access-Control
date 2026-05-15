@@ -1,7 +1,9 @@
+from types import SimpleNamespace
+
 import pytest
 
 from backend.app.domain import RelayDesiredState
-from backend.app.relay.service import RelayArbiter, RelayCommand, RelayConflictError
+from backend.app.relay.service import RelayArbiter, RelayCommand, RelayConflictError, UsbRelayDriver
 
 
 def test_highest_priority_relay_command_wins() -> None:
@@ -28,3 +30,20 @@ def test_equal_priority_conflict_is_rejected() -> None:
             ]
         )
 
+
+def test_usbrelay_maps_default_board_to_single_detected_board(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, check, capture_output=False, text=False):
+        calls.append(args)
+        if len(args) == 1:
+            return SimpleNamespace(stdout="REL0A_1=0\nREL0A_2=0\nREL0A_3=0\nREL0A_4=0\n")
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr("backend.app.relay.service.subprocess.run", fake_run)
+
+    driver = UsbRelayDriver()
+
+    assert driver.device_count() == 4
+    driver.set_channel("board-1", 2, RelayDesiredState.ON)
+    assert calls[-1] == ["usbrelay", "REL0A_2=1"]

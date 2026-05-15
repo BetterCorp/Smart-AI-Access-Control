@@ -239,11 +239,13 @@ def load_hailo_bindings() -> dict[str, Any]:
         from hailo_apps.python.core.common.buffer_utils import get_caps_from_pad, get_numpy_from_buffer
         from hailo_apps.python.core.common.core import get_resource_path, resolve_hef_path
         from hailo_apps.python.core.common.defines import (
+            DEFAULT_DOTENV_PATH,
             DETECTION_PIPELINE,
             DETECTION_POSTPROCESS_FUNCTION,
             DETECTION_POSTPROCESS_SO_FILENAME,
             RESOURCES_SO_DIR_NAME,
         )
+        from hailo_apps.python.core.common.core import load_environment
         from hailo_apps.python.core.common.hef_utils import get_hef_labels_json
         from hailo_apps.python.core.common.installation_utils import detect_hailo_arch
         from hailo_apps.python.core.gstreamer.gstreamer_helper_pipelines import (
@@ -273,6 +275,8 @@ def load_hailo_bindings() -> dict[str, Any]:
         "get_numpy_from_buffer": get_numpy_from_buffer,
         "get_resource_path": get_resource_path,
         "resolve_hef_path": resolve_hef_path,
+        "load_environment": load_environment,
+        "DEFAULT_DOTENV_PATH": DEFAULT_DOTENV_PATH,
         "DETECTION_PIPELINE": DETECTION_PIPELINE,
         "DETECTION_POSTPROCESS_FUNCTION": DETECTION_POSTPROCESS_FUNCTION,
         "DETECTION_POSTPROCESS_SO_FILENAME": DETECTION_POSTPROCESS_SO_FILENAME,
@@ -288,18 +292,30 @@ def load_hailo_bindings() -> dict[str, Any]:
 
 
 def resolve_detection_resources(bindings: dict[str, Any]) -> HailoPipelineResources:
+    bindings["load_environment"](bindings["DEFAULT_DOTENV_PATH"])
     arch = bindings["detect_hailo_arch"]()
     hef_path = bindings["resolve_hef_path"](
         None,
         app_name=bindings["DETECTION_PIPELINE"],
         arch=arch,
+        app_type="pipeline",
     )
+    if hef_path is None:
+        raise RuntimeError(
+            f"No default Hailo detection model is available for architecture '{arch}'. "
+            "Re-run setup so Hailo detection resources are installed."
+        )
     post_process_so = bindings["get_resource_path"](
         bindings["DETECTION_PIPELINE"],
         bindings["RESOURCES_SO_DIR_NAME"],
         arch,
         bindings["DETECTION_POSTPROCESS_SO_FILENAME"],
     )
+    if post_process_so is None:
+        raise RuntimeError(
+            f"No Hailo detection post-process library is available for architecture '{arch}'. "
+            "Re-run setup so Hailo post-install completes."
+        )
     labels_json = bindings["get_hef_labels_json"](hef_path)
     return HailoPipelineResources(
         hef_path=str(hef_path),

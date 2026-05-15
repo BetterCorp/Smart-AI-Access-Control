@@ -82,6 +82,7 @@ The installer is idempotent. Run the same command for a fresh install or to upda
 - clone or update the repo at `/opt/smart-ai-access-control`,
 - create/update the Python virtual environment,
 - install Node.js/npm and build TypeScript assets from source,
+- install the Debian `usbrelay` CLI used by the relay driver,
 - install systemd services,
 - install the USB relay udev rule,
 - expose the app directly on `0.0.0.0:8000`,
@@ -90,6 +91,7 @@ The installer is idempotent. Run the same command for a fresh install or to upda
 - verify `http://127.0.0.1:8000/healthz`.
 - install the official `hailo-apps` Python package used by the real person-counting provider when Hailo support is enabled.
 - build the app virtualenv with access to system Python packages so apt-installed `gi`/Hailo bindings remain visible.
+- run Hailo post-install for the `detection` group so the default HEF, post-process libraries, and environment file exist before the worker starts.
 
 Fresh install or update from GitHub:
 
@@ -160,6 +162,8 @@ Health separates relay software enablement from relay visibility:
 
 - `Relay control enabled` reflects `SMARTAI_ENABLE_RELAY_HARDWARE`.
 - `Relay channels visible` is how many channels the worker can see through the `usbrelay` command.
+
+For the default single-board setup, the relay driver maps the placeholder board id `board-1` to the one detected `usbrelay` board id automatically. Multi-board installs need explicit relay mapping rather than relying on that convenience path.
 
 Frontend build output under `backend/app/static/dist/` is generated during local setup and Pi deployment; it is not committed to the repository.
 
