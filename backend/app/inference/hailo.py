@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import multiprocessing as mp
+import queue
+import signal
 import threading
 import time
 from dataclasses import dataclass
@@ -71,41 +74,37 @@ class HailoMonitorSession:
         self._latest_error: str | None = None
         self._latest_bus_message: str | None = None
         self._started_at = time.monotonic()
-        self._loop: Any = None
-        self._pipeline: Any = None
-        self._thread: threading.Thread | None = None
+        self._queue: Any = mp.get_context("spawn").Queue(maxsize=3)
+        self._process: mp.Process | None = None
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        self._thread = threading.Thread(
-            target=self._run,
+        self._process = mp.get_context("spawn").Process(
+            target=run_hailo_child,
+            args=(self.monitor, self.camera, self._queue),
             name=f"hailo-monitor-{self.monitor.id}",
             daemon=True,
         )
-        self._thread.start()
+        self._process.start()
 
     def stop(self) -> None:
-        pipeline = self._pipeline
-        loop = self._loop
-        if pipeline is not None:
-            try:
-                from gi.repository import Gst
-
-                pipeline.set_state(Gst.State.NULL)
-            except Exception:
-                pass
-        if loop is not None:
-            try:
-                loop.quit()
-            except Exception:
-                pass
+        process = self._process
+        if process is None:
+            return
+        if process.is_alive():
+            process.terminate()
+        process.join(timeout=2)
 
     def latest_result(self) -> InferenceResult:
+        self._drain_messages()
         with self._lock:
             if self._latest_result is not None:
                 return self._latest_result
             if self._latest_error is not None:
                 raise RuntimeError(self._latest_error)
+            process = self._process
+            if process is not None and process.exitcode is not None:
+                raise RuntimeError(format_child_exit(process.exitcode))
             waited = time.monotonic() - self._started_at
             bus_message = self._latest_bus_message
         detail = f" Latest pipeline message: {bus_message}" if bus_message else ""
@@ -115,7 +114,31 @@ class HailoMonitorSession:
             )
         raise RuntimeError(f"Waiting for first Hailo frame from the RTSP pipeline ({waited:.0f}s).{detail}")
 
-    def _run(self) -> None:
+    def _drain_messages(self) -> None:
+        while True:
+            try:
+                kind, payload = self._queue.get_nowait()
+            except queue.Empty:
+                return
+            with self._lock:
+                if kind == "result":
+                    self._latest_result = payload
+                    self._latest_error = None
+                elif kind == "error":
+                    self._latest_error = str(payload)
+                elif kind == "bus":
+                    self._latest_bus_message = str(payload)
+
+
+class HailoPipelineRunner:
+    def __init__(self, monitor: MonitorConfig, camera: CameraConfig, output_queue: Any) -> None:
+        self.monitor = monitor
+        self.camera = camera
+        self.output_queue = output_queue
+        self._loop: Any = None
+        self._pipeline: Any = None
+
+    def run(self) -> None:
         try:
             bindings = load_hailo_bindings()
             resources = resolve_detection_resources(bindings)
@@ -145,7 +168,7 @@ class HailoMonitorSession:
             pipeline.set_state(Gst.State.PLAYING)
             loop.run()
         except Exception as exc:
-            self._set_error(str(exc))
+            self._publish("error", str(exc))
         finally:
             pipeline = self._pipeline
             if pipeline is not None:
@@ -178,37 +201,52 @@ class HailoMonitorSession:
                         if ok:
                             debug_jpeg = encoded.tobytes()
 
-            with self._lock:
-                self._latest_result = InferenceResult(observations, debug_jpeg=debug_jpeg)
-                self._latest_error = None
+            self._publish("result", InferenceResult(observations, debug_jpeg=debug_jpeg))
         except Exception as exc:
-            self._set_error(str(exc))
+            self._publish("error", str(exc))
 
     def _on_bus_message(self, _bus: Any, message: Any, bindings: dict[str, Any]) -> None:
         Gst = bindings["Gst"]
         if message.type == Gst.MessageType.ERROR:
             error, debug = message.parse_error()
             suffix = f" ({debug})" if debug else ""
-            self._set_error(f"GStreamer error: {error}{suffix}")
+            self._publish("error", f"GStreamer error: {error}{suffix}")
         elif message.type == Gst.MessageType.EOS:
-            self._set_error("GStreamer stream ended.")
+            self._publish("error", "GStreamer stream ended.")
         elif message.type == Gst.MessageType.WARNING:
             warning, debug = message.parse_warning()
             suffix = f" ({debug})" if debug else ""
-            self._set_bus_message(f"GStreamer warning: {warning}{suffix}")
+            self._publish("bus", f"GStreamer warning: {warning}{suffix}")
         elif message.type == Gst.MessageType.STATE_CHANGED and message.src == self._pipeline:
             old_state, new_state, _pending = message.parse_state_changed()
-            self._set_bus_message(
+            self._publish(
+                "bus",
                 f"Pipeline state changed from {old_state.value_nick} to {new_state.value_nick}."
             )
 
-    def _set_error(self, message: str) -> None:
-        with self._lock:
-            self._latest_error = message
+    def _publish(self, kind: str, payload: object) -> None:
+        try:
+            self.output_queue.put_nowait((kind, payload))
+        except queue.Full:
+            try:
+                self.output_queue.get_nowait()
+            except queue.Empty:
+                pass
+            self.output_queue.put_nowait((kind, payload))
 
-    def _set_bus_message(self, message: str) -> None:
-        with self._lock:
-            self._latest_bus_message = message
+
+def run_hailo_child(monitor: MonitorConfig, camera: CameraConfig, output_queue: Any) -> None:
+    HailoPipelineRunner(monitor, camera, output_queue).run()
+
+
+def format_child_exit(exitcode: int) -> str:
+    if exitcode < 0:
+        try:
+            signal_name = signal.Signals(-exitcode).name
+        except ValueError:
+            signal_name = f"signal {-exitcode}"
+        return f"Hailo pipeline process exited with {signal_name}."
+    return f"Hailo pipeline process exited with code {exitcode}."
 
 
 def observations_for(

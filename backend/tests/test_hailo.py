@@ -5,6 +5,7 @@ from backend.app.inference.hailo import (
     HailoMonitorSession,
     HailoPipelineResources,
     build_detection_pipeline,
+    format_child_exit,
     observations_for,
     resolve_detection_resources,
 )
@@ -55,7 +56,7 @@ def test_hailo_session_reports_first_frame_timeout() -> None:
     monitor = MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1")
     session = HailoMonitorSession(monitor, camera, fingerprint=())
     session._started_at -= 10
-    session._set_bus_message("Pipeline state changed from ready to paused.")
+    session._queue.put_nowait(("bus", "Pipeline state changed from ready to paused."))
 
     with pytest.raises(RuntimeError, match="No Hailo frame received after 10s"):
         session.latest_result()
@@ -79,3 +80,7 @@ def test_hailo_pipeline_keeps_callback_before_headless_sink() -> None:
 
     assert "identity name=identity_callback ! videoconvert" in pipeline
     assert "hailooverlay" not in pipeline
+
+
+def test_hailo_child_signal_exit_is_reported() -> None:
+    assert format_child_exit(-11) == "Hailo pipeline process exited with SIGSEGV."
