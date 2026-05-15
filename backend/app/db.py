@@ -129,6 +129,13 @@ class Database:
                   PRIMARY KEY (monitor_id, metric)
                 );
 
+                CREATE TABLE IF NOT EXISTS monitor_debug_snapshots (
+                  monitor_id TEXT PRIMARY KEY,
+                  path TEXT NOT NULL,
+                  mime_type TEXT NOT NULL,
+                  observed_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS rules (
                   id TEXT PRIMARY KEY,
                   name TEXT NOT NULL,
@@ -400,6 +407,63 @@ class Repository:
                 """
             ).fetchall()
 
+    def save_monitor_debug_snapshot(self, monitor_id: str, path: Path, observed_at: datetime) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO monitor_debug_snapshots (monitor_id, path, mime_type, observed_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(monitor_id) DO UPDATE SET
+                  path = excluded.path,
+                  mime_type = excluded.mime_type,
+                  observed_at = excluded.observed_at
+                """,
+                (monitor_id, str(path), "image/jpeg", observed_at.isoformat()),
+            )
+
+    def list_monitor_debug_snapshots(self) -> list[sqlite3.Row]:
+        with self.db.connect() as conn:
+            return conn.execute(
+                """
+                SELECT monitors.name AS monitor_name, monitor_debug_snapshots.*
+                FROM monitor_debug_snapshots
+                JOIN monitors ON monitors.id = monitor_debug_snapshots.monitor_id
+                ORDER BY monitor_debug_snapshots.observed_at DESC, monitors.name
+                """
+            ).fetchall()
+
+    def get_monitor_debug_snapshot(self, monitor_id: str) -> sqlite3.Row | None:
+        with self.db.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM monitor_debug_snapshots WHERE monitor_id = ?",
+                (monitor_id,),
+            ).fetchone()
+
+    def live_signatures(self) -> dict[str, str]:
+        with self.db.connect() as conn:
+            monitor_outputs = conn.execute(
+                "SELECT COALESCE(MAX(observed_at), '') FROM monitor_states"
+            ).fetchone()[0]
+            monitor_debug = conn.execute(
+                "SELECT COALESCE(MAX(observed_at), '') FROM monitor_debug_snapshots"
+            ).fetchone()[0]
+            events = conn.execute(
+                "SELECT COALESCE(MAX(created_at), '') || ':' || COUNT(*) FROM events"
+            ).fetchone()[0]
+            relays = conn.execute(
+                "SELECT COALESCE(MAX(updated_at), '') FROM relay_channels"
+            ).fetchone()[0]
+            cameras = conn.execute(
+                "SELECT COALESCE(MAX(updated_at), '') FROM cameras"
+            ).fetchone()[0]
+        return {
+            "monitor_outputs": str(monitor_outputs),
+            "monitor_debug": str(monitor_debug),
+            "events": str(events),
+            "relays": str(relays),
+            "health": "|".join(str(value) for value in [monitor_outputs, monitor_debug, events, relays, cameras]),
+        }
+
     def set_camera_health(self, camera_id: str, health: str, last_error: str | None = None) -> None:
         with self.db.connect() as conn:
             conn.execute(
@@ -411,6 +475,10 @@ class Repository:
         with self.db.connect() as conn:
             rows = conn.execute("SELECT * FROM relay_channels ORDER BY channel_number").fetchall()
         return [relay_from_row(row) for row in rows]
+
+    def list_relay_rows(self) -> list[sqlite3.Row]:
+        with self.db.connect() as conn:
+            return conn.execute("SELECT * FROM relay_channels ORDER BY channel_number").fetchall()
 
     def get_relay(self, relay_id: str) -> RelayChannelConfig | None:
         with self.db.connect() as conn:

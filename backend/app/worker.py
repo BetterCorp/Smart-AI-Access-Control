@@ -15,6 +15,7 @@ from backend.app.domain import (
     Action,
     CameraConfig,
     Detection,
+    InferenceResult,
     MonitorConfig,
     Observation,
     RelayAction,
@@ -37,7 +38,7 @@ ONE_PIXEL_JPEG = bytes.fromhex(
 
 
 class InferenceProvider(Protocol):
-    def observations_for(self, monitor: MonitorConfig, camera: CameraConfig) -> list[Observation]:
+    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         ...
 
 
@@ -45,38 +46,42 @@ class InferenceProvider(Protocol):
 class MockInferenceProvider:
     counts: dict[str, int]
 
-    def observations_for(self, monitor: MonitorConfig, camera: CameraConfig) -> list[Observation]:
+    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         if monitor.model_id == "weapon_visibility":
             visible = bool(self.counts.get(monitor.id, self.counts.get(camera.id, 0)))
             count = 1 if visible else 0
-            return [
-                Observation("core.weapon_visibility", camera.id, "weapon.visible", visible, monitor_id=monitor.id, model_id=monitor.model_id),
-                Observation("core.weapon_visibility", camera.id, "weapon.count", count, monitor_id=monitor.id, model_id=monitor.model_id),
-            ]
+            return InferenceResult(
+                [
+                    Observation("core.weapon_visibility", camera.id, "weapon.visible", visible, monitor_id=monitor.id, model_id=monitor.model_id),
+                    Observation("core.weapon_visibility", camera.id, "weapon.count", count, monitor_id=monitor.id, model_id=monitor.model_id),
+                ]
+            )
 
         count = self.counts.get(monitor.id, self.counts.get(camera.id, 0))
         class_name = str(monitor.config.get("class_name", "person"))
         confidence = float(monitor.config.get("confidence_threshold", 0.5))
         detections = [Detection(class_name, 0.9, (0.1 + index * 0.05, 0.1, 0.2, 0.5)) for index in range(max(0, count))]
         observations = ObjectCountPlugin().on_detections(camera, detections, ObjectCountConfig(class_name, confidence))
-        return [
-            Observation(
-                observation.plugin_id,
-                observation.camera_id,
-                observation.metric,
-                observation.value,
-                timestamp=observation.timestamp,
-                monitor_id=monitor.id,
-                model_id=monitor.model_id,
-                zone_id=observation.zone_id,
-                labels=observation.labels,
-            )
-            for observation in observations
-        ]
+        return InferenceResult(
+            [
+                Observation(
+                    observation.plugin_id,
+                    observation.camera_id,
+                    observation.metric,
+                    observation.value,
+                    timestamp=observation.timestamp,
+                    monitor_id=monitor.id,
+                    model_id=monitor.model_id,
+                    zone_id=observation.zone_id,
+                    labels=observation.labels,
+                )
+                for observation in observations
+            ]
+        )
 
 
 class HailoGStreamerProvider:
-    def observations_for(self, monitor: MonitorConfig, camera: CameraConfig) -> list[Observation]:
+    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         raise RuntimeError(
             "Hailo provider is not wired in this environment. Set SMARTAI_MOCK_INFERENCE=1 or implement the Pi GStreamer adapter."
         )
@@ -114,10 +119,14 @@ class Worker:
                 observations_by_monitor[monitor.id] = []
                 continue
             try:
-                observations = self.inference.observations_for(monitor, camera)
+                result = self.inference.result_for(monitor, camera)
+                observations = result.observations
                 observations_by_monitor[monitor.id] = observations
                 for observation in observations:
                     self.repo.record_observation(observation)
+                if result.debug_jpeg is not None:
+                    path = self.snapshot_store.write_monitor_debug_snapshot(monitor.id, result.debug_jpeg)
+                    self.repo.save_monitor_debug_snapshot(monitor.id, path, datetime.now(timezone.utc))
                 self.repo.set_camera_health(camera.id, "online")
             except Exception as exc:
                 observations_by_monitor[monitor.id] = []

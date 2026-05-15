@@ -55,6 +55,8 @@ SMARTAI_ENABLE_RELAY_HARDWARE=0
 
 Use mock inference during development. On the Pi, the relay hardware is only driven when `SMARTAI_ENABLE_RELAY_HARDWARE=1`.
 
+When mock inference is enabled, AI monitor values are simulated and do not come from live camera frames. The Monitors page states the active inference mode and exposes live metric updates plus debug-snapshot slots for real providers.
+
 ## Raspberry Pi Target
 
 Use Raspberry Pi OS Lite 64-bit on the Pi 5. Install the Hailo stack with Raspberry Pi packages, verify with `hailortcli fw-control identify`, then run the app as systemd services using the templates under `deploy/`.

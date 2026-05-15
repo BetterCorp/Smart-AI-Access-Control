@@ -1,0 +1,16 @@
+<section id="relay-status" class="panel live-fragment" data-live-event="relays" data-live-url="/ui/relays/status">
+  <h3>Relay Status</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Channel</th><th>Current State</th><th>Fail State</th></tr></thead>
+    <tbody>
+      {% for relay in relay_rows %}
+      <tr>
+        <td>{{ relay.name }}</td>
+        <td>{{ relay.channel_number }}</td>
+        <td>{{ relay.current_state }}</td>
+        <td>{{ relay.global_fail_state }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

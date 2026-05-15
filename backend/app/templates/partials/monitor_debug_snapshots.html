@@ -1,0 +1,17 @@
+<section id="monitor-debug-snapshots" class="live-fragment" data-live-event="monitor_debug" data-live-url="/ui/monitors/debug-snapshots">
+  <h3>Latest Debug Snapshots</h3>
+  <table>
+    <thead><tr><th>Monitor</th><th>Observed</th><th>Snapshot</th></tr></thead>
+    <tbody>
+      {% for snapshot in monitor_debug_snapshots %}
+      <tr>
+        <td>{{ snapshot.monitor_name }}</td>
+        <td>{{ snapshot.observed_at }}</td>
+        <td><a href="/api/monitors/{{ snapshot.monitor_id }}/debug-snapshot">View</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">No debug snapshots available from the active inference provider.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

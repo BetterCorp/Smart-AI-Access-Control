@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.app.camera.rtsp import build_rtsp_url
-from backend.app.domain import CameraConfig, Observation
+from backend.app.domain import CameraConfig, InferenceResult, MonitorConfig
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,7 @@ class HailoRtspAdapter:
             "hailofilter ! appsink name=detections sync=false max-buffers=1 drop=true"
         )
 
-    def observations_for(self, camera: CameraConfig) -> list[Observation]:
+    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         raise NotImplementedError(
             "Wire this adapter on the Raspberry Pi after validating the exact Hailo/TAPPAS pipeline and metadata format."
         )
-

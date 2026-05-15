@@ -13,7 +13,7 @@
   <article><strong>{{ event_count }}</strong><span>Recent events</span></article>
   <article><strong>{{ plugins|join(", ") }}</strong><span>Plugins</span></article>
 </section>
-<section class="panel" hx-get="/ui/system/health" hx-trigger="load, every 10s" hx-swap="innerHTML">
+<section id="health-panel" class="panel live-fragment" data-live-event="health" data-live-url="/ui/system/health" data-live-swap="innerHTML" hx-get="/ui/system/health" hx-trigger="load" hx-swap="innerHTML">
   Loading health...
 </section>
 <section class="panel">

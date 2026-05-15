@@ -6,6 +6,16 @@
   <p>Monitors run an AI model or analytic and publish typed metrics for rules.</p>
 </section>
 <section class="panel">
+  <h3>Inference Mode</h3>
+  <p>
+    {% if inference_mode == "mock" %}
+    Mock inference is active. Monitor values are simulated and do not come from camera frames.
+    {% else %}
+    Real inference is active.
+    {% endif %}
+  </p>
+</section>
+<section class="panel">
   <h3>AI Model Catalog</h3>
   <table>
     <thead><tr><th>Analytics Monitor</th><th>Actual AI Model</th><th>Used For Analytics</th><th>Metric</th><th>Type</th><th>Description</th></tr></thead>

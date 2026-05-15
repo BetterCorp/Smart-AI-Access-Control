@@ -19,20 +19,6 @@
       {% endfor %}
     </tbody>
   </table>
-  <h3>Latest AI Outputs</h3>
-  <table>
-    <thead><tr><th>Monitor</th><th>Metric</th><th>Value</th><th>Observed</th></tr></thead>
-    <tbody>
-      {% for state in monitor_states %}
-      <tr>
-        <td>{{ state.monitor_name }}</td>
-        <td>{{ state.metric }}</td>
-        <td>{{ state.value }}</td>
-        <td>{{ state.observed_at }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="4">No AI outputs observed yet.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  {% include "partials/monitor_debug_snapshots.html" %}
+  {% include "partials/monitor_outputs.html" %}
 </section>

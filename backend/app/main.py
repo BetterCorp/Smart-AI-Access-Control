@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import asyncio
+import json
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -135,6 +137,8 @@ def monitors_page(request: Request) -> HTMLResponse:
             "cameras": repo.list_cameras(),
             "models": model_options(),
             "monitor_states": repo.list_monitor_states(),
+            "monitor_debug_snapshots": repo.list_monitor_debug_snapshots(),
+            "inference_mode": "mock" if settings.use_mock_inference else "real",
         },
     )
 
@@ -147,6 +151,29 @@ def monitors_table(request: Request) -> HTMLResponse:
         {
             "monitors": repo.list_monitors(),
             "monitor_states": repo.list_monitor_states(),
+            "monitor_debug_snapshots": repo.list_monitor_debug_snapshots(),
+        },
+    )
+
+
+@app.get("/ui/monitors/outputs", response_class=HTMLResponse)
+def monitor_outputs(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "partials/monitor_outputs.html",
+        {
+            "monitor_states": repo.list_monitor_states(),
+        },
+    )
+
+
+@app.get("/ui/monitors/debug-snapshots", response_class=HTMLResponse)
+def monitor_debug_snapshots(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "partials/monitor_debug_snapshots.html",
+        {
+            "monitor_debug_snapshots": repo.list_monitor_debug_snapshots(),
         },
     )
 
@@ -231,6 +258,17 @@ def delete_monitor(request: Request, monitor_id: str) -> Response:
     if wants_fragment(request):
         return monitors_table(request)
     return RedirectResponse("/monitors", status_code=303)
+
+
+@app.get("/api/monitors/{monitor_id}/debug-snapshot")
+def monitor_debug_snapshot(monitor_id: str) -> FileResponse:
+    row = repo.get_monitor_debug_snapshot(monitor_id)
+    if row is None:
+        raise HTTPException(status_code=404)
+    path = Path(row["path"])
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type=row["mime_type"], filename=path.name)
 
 
 @app.get("/cameras", response_class=HTMLResponse)
@@ -376,7 +414,23 @@ def delete_rule(request: Request, rule_id: str) -> Response:
 
 @app.get("/relays", response_class=HTMLResponse)
 def relays_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "pages/relays.html", {"relays": repo.list_relays()})
+    return templates.TemplateResponse(
+        request,
+        "pages/relays.html",
+        {
+            "relays": repo.list_relays(),
+            "relay_rows": repo.list_relay_rows(),
+        },
+    )
+
+
+@app.get("/ui/relays/status", response_class=HTMLResponse)
+def relay_status(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "partials/relay_status.html",
+        {"relay_rows": repo.list_relay_rows()},
+    )
 
 
 @app.post("/ui/relays/test-channel", response_class=HTMLResponse)
@@ -399,6 +453,11 @@ def test_relay(
 @app.get("/events", response_class=HTMLResponse)
 def events_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "pages/events.html", {"events": repo.list_events(limit=250)})
+
+
+@app.get("/ui/events/table", response_class=HTMLResponse)
+def events_table(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "partials/events_table.html", {"events": repo.list_events(limit=250)})
 
 
 @app.get("/api/events/{event_id}/snapshot")
@@ -463,6 +522,22 @@ def health_panel(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "partials/health.html", {"health": health()})
 
 
+@app.get("/api/live/stream")
+async def live_stream() -> StreamingResponse:
+    async def event_stream():
+        previous = repo.live_signatures()
+        yield sse_message("ready", {"ok": True})
+        while True:
+            await asyncio.sleep(1)
+            current = repo.live_signatures()
+            for event_name, signature in current.items():
+                if signature != previous.get(event_name):
+                    yield sse_message(event_name, {"changed": True})
+            previous = current
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 def parse_condition_value(raw: str) -> int | float | bool | str:
     normalized = raw.strip()
     if normalized.lower() == "true":
@@ -477,3 +552,7 @@ def parse_condition_value(raw: str) -> int | float | bool | str:
         return float(normalized)
     except ValueError:
         return normalized
+
+
+def sse_message(event_name: str, payload: dict[str, object]) -> str:
+    return f"event: {event_name}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"

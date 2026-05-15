@@ -49,6 +49,13 @@ class SnapshotStore:
             bytes_len=len(jpeg_bytes),
         )
 
+    def write_monitor_debug_snapshot(self, monitor_id: str, jpeg_bytes: bytes) -> Path:
+        debug_root = self.config.snapshot_root / "monitor-debug"
+        debug_root.mkdir(parents=True, exist_ok=True)
+        path = debug_root / f"{monitor_id}.jpg"
+        path.write_bytes(jpeg_bytes)
+        return path
+
     def records(self) -> list[SnapshotRecord]:
         records = []
         for path in self.config.snapshot_root.glob("*.jpg"):
@@ -102,4 +109,3 @@ def snapshot_dedupe_key(
 
 def event_id(prefix: str = "evt") -> str:
     return f"{prefix}_{utc_now().strftime('%Y%m%d%H%M%S%f')}"
-

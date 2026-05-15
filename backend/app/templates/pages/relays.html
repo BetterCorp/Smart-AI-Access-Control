@@ -4,6 +4,7 @@
 <section class="page-header">
   <h2>Relays</h2>
 </section>
+{% include "partials/relay_status.html" %}
 <section class="panel">
   <form hx-post="/ui/relays/test-channel" hx-target="#relay-test-result">
     <label>Channel
@@ -24,4 +25,3 @@
   <div id="relay-test-result"></div>
 </section>
 {% endblock %}
-

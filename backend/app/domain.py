@@ -105,6 +105,12 @@ class Observation:
 
 
 @dataclass(frozen=True)
+class InferenceResult:
+    observations: list[Observation]
+    debug_jpeg: bytes | None = None
+
+
+@dataclass(frozen=True)
 class RuleCondition:
     metric: str
     operator: str

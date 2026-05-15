@@ -35,6 +35,16 @@ Rules bind to one monitor and contain a condition group. The rule engine evaluat
 
 Actions are separate from conditions. Relay output, webhooks, snapshots, debounce, cooldown, and fail policy are rule-output concerns, not AI model concerns.
 
+## Live UI
+
+The browser keeps an authenticated SSE connection to `/api/live/stream`.
+
+The API process polls persisted state signatures and emits change events when monitor outputs, monitor debug snapshots, events, relays, or health-relevant state change. Browser TypeScript refreshes only the affected server-rendered fragments, so the worker and API can remain separate processes without an external broker.
+
+## Debug Snapshots
+
+An inference provider returns `InferenceResult`, which contains typed observations plus an optional debug JPEG from the exact analyzed frame. Mock inference intentionally returns no debug image. A real Hailo provider should attach an annotated debug frame so operator-visible counts can be compared against what the detector actually saw.
+
 ## Inference Boundary
 
 Development uses `MockInferenceProvider`, which produces deterministic person counts for tests and local runs.

@@ -4,25 +4,5 @@
 <section class="page-header">
   <h2>Events</h2>
 </section>
-<section class="panel">
-  <table>
-    <thead><tr><th>Time</th><th>Camera</th><th>Rule</th><th>State</th><th>Metric</th><th>Value</th><th>Webhook</th><th>Snapshot</th></tr></thead>
-    <tbody>
-      {% for event in events %}
-      <tr>
-        <td>{{ event.created_at }}</td>
-        <td>{{ event.camera_id }}</td>
-        <td>{{ event.rule_id }}</td>
-        <td>{{ event.state }}</td>
-        <td>{{ event.metric }}</td>
-        <td>{{ event.value }}</td>
-        <td>{{ event.webhook_status }}</td>
-        <td>{% if event.snapshot_path %}<a href="/api/events/{{ event.id }}/snapshot">View</a>{% else %}-{% endif %}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="8">No events yet.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</section>
+{% include "partials/events_table.html" %}
 {% endblock %}
