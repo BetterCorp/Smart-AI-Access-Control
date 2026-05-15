@@ -1,7 +1,13 @@
 from backend.app.domain import CameraConfig, Detection, MonitorConfig
 import pytest
 
-from backend.app.inference.hailo import observations_for, resolve_detection_resources
+from backend.app.inference.hailo import (
+    HailoMonitorSession,
+    HailoPipelineResources,
+    build_detection_pipeline,
+    observations_for,
+    resolve_detection_resources,
+)
 
 
 def test_hailo_observations_include_monitor_identity() -> None:
@@ -42,3 +48,34 @@ def test_hailo_resources_fail_cleanly_when_default_model_is_missing() -> None:
                 "DETECTION_PIPELINE": "detection",
             }
         )
+
+
+def test_hailo_session_reports_first_frame_timeout() -> None:
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    monitor = MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1")
+    session = HailoMonitorSession(monitor, camera, fingerprint=())
+    session._started_at -= 10
+    session._set_bus_message("Pipeline state changed from ready to paused.")
+
+    with pytest.raises(RuntimeError, match="No Hailo frame received after 10s"):
+        session.latest_result()
+
+
+def test_hailo_pipeline_keeps_callback_before_headless_sink() -> None:
+    bindings = {
+        "SOURCE_PIPELINE": lambda *_args, **_kwargs: "source",
+        "INFERENCE_PIPELINE": lambda **_kwargs: "inference",
+        "INFERENCE_PIPELINE_WRAPPER": lambda inner: f"wrapped({inner})",
+        "TRACKER_PIPELINE": lambda class_id: f"tracker({class_id})",
+        "USER_CALLBACK_PIPELINE": lambda: "identity name=identity_callback",
+    }
+
+    pipeline = build_detection_pipeline(
+        bindings,
+        "rtsp://camera/live",
+        HailoPipelineResources("/tmp/model.hef", "/tmp/post.so", "filter", None),
+        analytics_fps=2,
+    )
+
+    assert "identity name=identity_callback ! videoconvert" in pipeline
+    assert "hailooverlay" not in pipeline

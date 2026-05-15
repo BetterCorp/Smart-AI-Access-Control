@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -68,6 +69,8 @@ class HailoMonitorSession:
         self.fingerprint = fingerprint
         self._latest_result: InferenceResult | None = None
         self._latest_error: str | None = None
+        self._latest_bus_message: str | None = None
+        self._started_at = time.monotonic()
         self._loop: Any = None
         self._pipeline: Any = None
         self._thread: threading.Thread | None = None
@@ -103,7 +106,14 @@ class HailoMonitorSession:
                 return self._latest_result
             if self._latest_error is not None:
                 raise RuntimeError(self._latest_error)
-        raise RuntimeError("Waiting for first Hailo frame from the RTSP stream.")
+            waited = time.monotonic() - self._started_at
+            bus_message = self._latest_bus_message
+        detail = f" Latest pipeline message: {bus_message}" if bus_message else ""
+        if waited >= 10:
+            raise RuntimeError(
+                f"No Hailo frame received after {waited:.0f}s from the RTSP pipeline.{detail}"
+            )
+        raise RuntimeError(f"Waiting for first Hailo frame from the RTSP pipeline ({waited:.0f}s).{detail}")
 
     def _run(self) -> None:
         try:
@@ -182,10 +192,23 @@ class HailoMonitorSession:
             self._set_error(f"GStreamer error: {error}{suffix}")
         elif message.type == Gst.MessageType.EOS:
             self._set_error("GStreamer stream ended.")
+        elif message.type == Gst.MessageType.WARNING:
+            warning, debug = message.parse_warning()
+            suffix = f" ({debug})" if debug else ""
+            self._set_bus_message(f"GStreamer warning: {warning}{suffix}")
+        elif message.type == Gst.MessageType.STATE_CHANGED and message.src == self._pipeline:
+            old_state, new_state, _pending = message.parse_state_changed()
+            self._set_bus_message(
+                f"Pipeline state changed from {old_state.value_nick} to {new_state.value_nick}."
+            )
 
     def _set_error(self, message: str) -> None:
         with self._lock:
             self._latest_error = message
+
+    def _set_bus_message(self, message: str) -> None:
+        with self._lock:
+            self._latest_bus_message = message
 
 
 def observations_for(
@@ -357,9 +380,8 @@ def build_detection_pipeline(
         f"{source} ! "
         f"{inference_wrapper} ! "
         f"{tracker} ! "
-        "hailooverlay ! "
+        f"{callback} ! "
         "videoconvert ! "
         "video/x-raw,format=RGB ! "
-        f"{callback} ! "
         "fakesink sync=false"
     )
