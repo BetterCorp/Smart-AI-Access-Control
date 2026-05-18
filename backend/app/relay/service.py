@@ -59,13 +59,20 @@ def relay_commands_for_rule(rule: RuleConfig, actions: list[object]) -> list[Rel
 
 
 class UsbRelayDriver:
-    def __init__(self, executable: str = "usbrelay") -> None:
+    def __init__(self, executable: str = "usbrelay", timeout_seconds: float = 2.0) -> None:
         self.executable = executable
+        self.timeout_seconds = timeout_seconds
 
     def list_channels(self) -> list[str]:
         try:
-            result = subprocess.run([self.executable], check=True, capture_output=True, text=True)
-        except (FileNotFoundError, subprocess.CalledProcessError):
+            result = subprocess.run(
+                [self.executable],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
         return [line.split("=", 1)[0].strip() for line in result.stdout.splitlines() if line.strip()]
 
@@ -75,7 +82,7 @@ class UsbRelayDriver:
     def set_channel(self, board_id: str, channel_number: int, state: RelayDesiredState) -> None:
         value = "1" if state == RelayDesiredState.ON else "0"
         target = f"{self._resolve_board_id(board_id)}_{channel_number}={value}"
-        subprocess.run([self.executable, target], check=True)
+        subprocess.run([self.executable, target], check=True, timeout=self.timeout_seconds)
 
     def _resolve_board_id(self, board_id: str) -> str:
         if board_id != "board-1":

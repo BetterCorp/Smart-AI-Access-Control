@@ -23,11 +23,17 @@ class HailoPipelineResources:
     labels_json: str | None
 
 
+@dataclass(frozen=True)
+class HailoDetectionFrame:
+    detections: list[Detection]
+    debug_jpeg: bytes | None = None
+
+
 class HailoGStreamerProvider:
-    """Runs one live Hailo/GStreamer session per active monitor."""
+    """Runs one live Hailo/GStreamer detector session per camera/model."""
 
     def __init__(self) -> None:
-        self._sessions: dict[str, HailoMonitorSession] = {}
+        self._sessions: dict[tuple[object, ...], HailoCameraSession] = {}
         self._lock = threading.Lock()
 
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
@@ -36,23 +42,50 @@ class HailoGStreamerProvider:
                 f"{monitor.model_id} needs a dedicated Hailo detector before it can run in real inference mode."
             )
 
-        fingerprint = (
+        fingerprint = self.session_fingerprint(camera, monitor.model_id)
+        with self._lock:
+            session = self._sessions.get(fingerprint)
+            if session is None:
+                session = HailoCameraSession(camera, fingerprint)
+                self._sessions[fingerprint] = session
+                session.start()
+            elif session.has_exited():
+                if not session.restart_ready():
+                    raise RuntimeError(session.exit_error())
+                session.stop()
+                session = HailoCameraSession(camera, fingerprint)
+                self._sessions[fingerprint] = session
+                session.start()
+
+        frame = session.latest_frame()
+        return InferenceResult(
+            observations_for(monitor, camera, frame.detections),
+            debug_jpeg=frame.debug_jpeg,
+        )
+
+    def prune_sessions(self, monitors: list[MonitorConfig], cameras: dict[str, CameraConfig]) -> None:
+        active = {
+            self.session_fingerprint(camera, monitor.model_id)
+            for monitor in monitors
+            if monitor.enabled
+            if monitor.model_id == "person_counter"
+            if (camera := cameras.get(monitor.camera_id)) is not None
+        }
+        with self._lock:
+            unused_keys = [key for key in self._sessions if key not in active]
+            sessions = [self._sessions.pop(key) for key in unused_keys]
+        for session in sessions:
+            session.stop()
+
+    @staticmethod
+    def session_fingerprint(camera: CameraConfig, detector_model_id: str) -> tuple[object, ...]:
+        return (
+            camera.id,
             build_rtsp_url(camera),
             camera.transport,
             camera.analytics_fps,
-            monitor.model_id,
-            tuple(sorted(monitor.config.items())),
+            detector_model_id,
         )
-        with self._lock:
-            session = self._sessions.get(monitor.id)
-            if session is None or session.fingerprint != fingerprint:
-                if session is not None:
-                    session.stop()
-                session = HailoMonitorSession(monitor, camera, fingerprint)
-                self._sessions[monitor.id] = session
-                session.start()
-
-        return session.latest_result()
 
     def close(self) -> None:
         with self._lock:
@@ -62,20 +95,21 @@ class HailoGStreamerProvider:
             session.stop()
 
 
-class HailoMonitorSession:
+class HailoCameraSession:
+    restart_backoff_seconds = 5.0
+
     def __init__(
         self,
-        monitor: MonitorConfig,
         camera: CameraConfig,
         fingerprint: tuple[object, ...],
     ) -> None:
-        self.monitor = monitor
         self.camera = camera
         self.fingerprint = fingerprint
-        self._latest_result: InferenceResult | None = None
+        self._latest_frame: HailoDetectionFrame | None = None
         self._latest_error: str | None = None
         self._latest_bus_message: str | None = None
         self._started_at = time.monotonic()
+        self._restart_after: float | None = None
         self._queue: Any = mp.get_context("spawn").Queue(maxsize=3)
         self._process: mp.Process | None = None
         self._lock = threading.Lock()
@@ -83,8 +117,8 @@ class HailoMonitorSession:
     def start(self) -> None:
         self._process = mp.get_context("spawn").Process(
             target=run_hailo_child,
-            args=(self.monitor, self.camera, self._queue),
-            name=f"hailo-monitor-{self.monitor.id}",
+            args=(self.camera, self._queue),
+            name=f"hailo-camera-{self.camera.id}",
             daemon=True,
         )
         self._process.start()
@@ -97,11 +131,30 @@ class HailoMonitorSession:
             process.terminate()
         process.join(timeout=2)
 
-    def latest_result(self) -> InferenceResult:
+    def has_exited(self) -> bool:
+        process = self._process
+        if process is None or process.exitcode is None:
+            return False
+        with self._lock:
+            if self._restart_after is None:
+                self._restart_after = time.monotonic() + self.restart_backoff_seconds
+        return True
+
+    def restart_ready(self) -> bool:
+        with self._lock:
+            return self._restart_after is not None and time.monotonic() >= self._restart_after
+
+    def exit_error(self) -> str:
+        process = self._process
+        if process is None or process.exitcode is None:
+            return "Hailo pipeline process is not running."
+        return format_child_exit(process.exitcode)
+
+    def latest_frame(self) -> HailoDetectionFrame:
         self._drain_messages()
         with self._lock:
-            if self._latest_result is not None:
-                return self._latest_result
+            if self._latest_frame is not None:
+                return self._latest_frame
             if self._latest_error is not None:
                 raise RuntimeError(self._latest_error)
             process = self._process
@@ -124,7 +177,7 @@ class HailoMonitorSession:
                 return
             with self._lock:
                 if kind == "result":
-                    self._latest_result = payload
+                    self._latest_frame = payload
                     self._latest_error = None
                 elif kind == "error":
                     self._latest_error = str(payload)
@@ -133,8 +186,7 @@ class HailoMonitorSession:
 
 
 class HailoPipelineRunner:
-    def __init__(self, monitor: MonitorConfig, camera: CameraConfig, output_queue: Any) -> None:
-        self.monitor = monitor
+    def __init__(self, camera: CameraConfig, output_queue: Any) -> None:
         self.camera = camera
         self.output_queue = output_queue
         self._loop: Any = None
@@ -186,9 +238,8 @@ class HailoPipelineRunner:
             roi = hailo.get_roi_from_buffer(buffer)
             hailo_detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
             detections = [detection_from_hailo(item) for item in hailo_detections]
-            observations = observations_for(self.monitor, self.camera, detections)
             debug_jpeg = self._build_debug_jpeg(element, buffer, bindings)
-            self._publish("result", InferenceResult(observations, debug_jpeg=debug_jpeg))
+            self._publish("result", HailoDetectionFrame(detections, debug_jpeg=debug_jpeg))
         except Exception as exc:
             self._publish("error", str(exc))
 
@@ -243,8 +294,8 @@ class HailoPipelineRunner:
             self.output_queue.put_nowait((kind, payload))
 
 
-def run_hailo_child(monitor: MonitorConfig, camera: CameraConfig, output_queue: Any) -> None:
-    HailoPipelineRunner(monitor, camera, output_queue).run()
+def run_hailo_child(camera: CameraConfig, output_queue: Any) -> None:
+    HailoPipelineRunner(camera, output_queue).run()
 
 
 def format_child_exit(exitcode: int) -> str:

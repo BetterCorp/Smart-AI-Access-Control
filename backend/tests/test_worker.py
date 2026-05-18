@@ -161,3 +161,42 @@ def test_worker_records_waiting_monitor_runtime(tmp_path) -> None:
     rows = repo.list_monitor_runtime_rows()
     assert rows[0]["status"] == "waiting"
     assert rows[0]["last_error"].startswith("Waiting for first Hailo frame")
+
+
+class FailingRelayDriver:
+    def device_count(self) -> int:
+        return 1
+
+    def set_channel(self, board_id: str, channel_number: int, state: RelayDesiredState) -> None:
+        raise TimeoutError("relay timeout")
+
+
+def test_worker_keeps_running_when_relay_write_fails(tmp_path) -> None:
+    db = Database(tmp_path / "smartai.db")
+    repo = Repository(db)
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    repo.save_camera(camera)
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_rule(
+        RuleConfig(
+            id="rule-1",
+            name="Mantrap",
+            enabled=True,
+            priority=100,
+            monitor_id="mon-1",
+            condition_group=ConditionGroup("all", [RuleCondition("person.count", ">=", 2)]),
+            true_actions=[RelayAction("relay-1", RelayDesiredState.ON)],
+        )
+    )
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        MockInferenceProvider({"mon-1": 2}),
+        relay_driver=FailingRelayDriver(),
+    )
+
+    worker.process_once()
+
+    with db.connect() as conn:
+        row = conn.execute("SELECT current_state FROM relay_channels WHERE id = 'relay-1'").fetchone()
+    assert row["current_state"] == "off"

@@ -2,7 +2,9 @@ from backend.app.domain import CameraConfig, Detection, MonitorConfig
 import pytest
 
 from backend.app.inference.hailo import (
-    HailoMonitorSession,
+    HailoCameraSession,
+    HailoDetectionFrame,
+    HailoGStreamerProvider,
     HailoPipelineRunner,
     HailoPipelineResources,
     build_detection_pipeline,
@@ -63,13 +65,12 @@ def test_hailo_resource_readability_is_checked(tmp_path) -> None:
 
 def test_hailo_session_reports_first_frame_timeout() -> None:
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
-    monitor = MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1")
-    session = HailoMonitorSession(monitor, camera, fingerprint=())
+    session = HailoCameraSession(camera, fingerprint=())
     session._started_at -= 10
     session._queue.put_nowait(("bus", "Pipeline state changed from ready to paused."))
 
     with pytest.raises(RuntimeError, match="No Hailo frame received after 10s"):
-        session.latest_result()
+        session.latest_frame()
 
 
 def test_hailo_pipeline_keeps_callback_before_headless_sink() -> None:
@@ -106,8 +107,7 @@ def test_hailo_child_signal_exit_is_reported() -> None:
 def test_hailo_debug_snapshot_failure_does_not_drop_observations() -> None:
     published: list[tuple[str, object]] = []
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
-    monitor = MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1")
-    runner = HailoPipelineRunner(monitor, camera, output_queue=None)
+    runner = HailoPipelineRunner(camera, output_queue=None)
     runner._publish = lambda kind, payload: published.append((kind, payload))
 
     class FakeDetection:
@@ -152,7 +152,51 @@ def test_hailo_debug_snapshot_failure_does_not_drop_observations() -> None:
 
     assert published[0] == ("bus", "Debug snapshot unavailable: snapshot failed")
     assert published[1][0] == "result"
-    assert [(item.metric, item.value) for item in published[1][1].observations] == [
-        ("person.count", 1),
-        ("person.present", True),
+    assert published[1][1].detections == [Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))]
+
+
+def test_hailo_provider_reuses_one_session_for_same_camera(monkeypatch) -> None:
+    created: list[tuple[object, ...]] = []
+
+    class FakeSession:
+        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...]) -> None:
+            self.camera = camera
+            self.fingerprint = fingerprint
+            created.append(fingerprint)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def has_exited(self) -> bool:
+            return False
+
+        def restart_ready(self) -> bool:
+            return False
+
+        def exit_error(self) -> str:
+            return ""
+
+        def latest_frame(self) -> HailoDetectionFrame:
+            return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
+
+    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    first = MonitorConfig("mon-1", "Strict", "person_counter", "cam-1", config={"confidence_threshold": 0.9})
+    second = MonitorConfig("mon-2", "Loose", "person_counter", "cam-1", config={"confidence_threshold": 0.5})
+    provider = HailoGStreamerProvider()
+
+    first_result = provider.result_for(first, camera)
+    second_result = provider.result_for(second, camera)
+
+    assert len(created) == 1
+    assert [(item.monitor_id, item.value) for item in first_result.observations] == [
+        ("mon-1", 1),
+        ("mon-1", True),
+    ]
+    assert [(item.monitor_id, item.value) for item in second_result.observations] == [
+        ("mon-2", 1),
+        ("mon-2", True),
     ]

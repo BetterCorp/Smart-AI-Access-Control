@@ -19,7 +19,7 @@ function refreshLiveFragments(eventName: string): void {
 
 function connectLiveStream(): void {
   const source = new EventSource("/api/live/stream");
-  ["monitor_outputs", "monitor_debug", "events", "relays", "health"].forEach((eventName) => {
+  ["monitors", "monitor_outputs", "monitor_debug", "events", "relays", "health"].forEach((eventName) => {
     source.addEventListener(eventName, () => refreshLiveFragments(eventName));
   });
 }

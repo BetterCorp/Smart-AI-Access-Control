@@ -115,9 +115,13 @@ class Worker:
         )
         cameras = self.repo.list_cameras()
         camera_by_id = {camera.id: camera for camera in cameras}
+        monitors = self.repo.list_monitors()
+        prune_sessions = getattr(self.inference, "prune_sessions", None)
+        if callable(prune_sessions):
+            prune_sessions(monitors, camera_by_id)
         observations_by_monitor: dict[str, list[Observation]] = {}
 
-        for monitor in self.repo.list_monitors():
+        for monitor in monitors:
             camera = camera_by_id.get(monitor.camera_id)
             if camera is None or not monitor.enabled:
                 observations_by_monitor[monitor.id] = []
@@ -264,7 +268,10 @@ class Worker:
             if relay is None:
                 continue
             if self.relay_driver is not None:
-                self.relay_driver.set_channel(relay.board_id, relay.channel_number, state)
+                try:
+                    self.relay_driver.set_channel(relay.board_id, relay.channel_number, state)
+                except Exception:
+                    continue
             self.repo.update_relay_state(relay_id, state)
 
 
