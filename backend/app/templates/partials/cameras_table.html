@@ -12,6 +12,7 @@
         <td>{{ camera["last_error"] or "" }}</td>
         <td>
           <button hx-post="/ui/cameras/{{ camera['id'] }}/test" hx-target="#camera-test-result">Test</button>
+          <button hx-post="/ui/cameras/{{ camera['id'] }}/snapshot" hx-target="#camera-test-result">Snapshot</button>
           <button hx-post="/ui/cameras/{{ camera['id'] }}/delete" hx-target="#camera-table" hx-swap="outerHTML">Delete</button>
         </td>
       </tr>

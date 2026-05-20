@@ -1,0 +1,11 @@
+<section class="notice">
+  {% if ok %}
+  <p>Snapshot captured for {{ camera.name }} ({{ bytes_len }} bytes).</p>
+  <div class="snapshot-view">
+    <img src="/api/cameras/{{ camera.id }}/snapshot?ts={{ bytes_len }}" alt="">
+  </div>
+  {% else %}
+  <p>Snapshot failed for {{ camera.name }}.</p>
+  <pre>{{ error }}</pre>
+  {% endif %}
+</section>

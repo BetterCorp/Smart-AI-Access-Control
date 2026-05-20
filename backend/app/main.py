@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from backend.app.camera.rtsp import mask_rtsp_url
+from backend.app.camera.snapshot import capture_rtsp_jpeg_result
 from backend.app.config import load_settings
 from backend.app.db import Database, Repository
 from backend.app.domain import (
@@ -362,6 +363,35 @@ def test_camera(request: Request, camera_id: str) -> HTMLResponse:
         "partials/camera_test_result.html",
         {"camera": camera, "masked_url": mask_rtsp_url(camera)},
     )
+
+
+@app.post("/ui/cameras/{camera_id}/snapshot", response_class=HTMLResponse)
+def test_camera_snapshot(request: Request, camera_id: str) -> HTMLResponse:
+    camera = repo.get_camera(camera_id)
+    if camera is None:
+        raise HTTPException(status_code=404)
+    result = capture_rtsp_jpeg_result(camera)
+    return templates.TemplateResponse(
+        request,
+        "partials/camera_snapshot_result.html",
+        {
+            "camera": camera,
+            "ok": result.ok,
+            "error": result.error,
+            "bytes_len": len(result.jpeg_bytes) if result.jpeg_bytes else 0,
+        },
+    )
+
+
+@app.get("/api/cameras/{camera_id}/snapshot")
+def camera_snapshot(camera_id: str) -> Response:
+    camera = repo.get_camera(camera_id)
+    if camera is None:
+        raise HTTPException(status_code=404)
+    result = capture_rtsp_jpeg_result(camera)
+    if result.jpeg_bytes is None:
+        raise HTTPException(status_code=502, detail=result.error or "snapshot capture failed")
+    return Response(content=result.jpeg_bytes, media_type="image/jpeg", headers={"Content-Disposition": "inline"})
 
 
 @app.get("/rules", response_class=HTMLResponse)
