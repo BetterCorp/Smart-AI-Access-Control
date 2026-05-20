@@ -817,6 +817,9 @@ def health() -> dict[str, object]:
         "mockInference": worker_status["inference_mode"] == "mock" if worker_status else None,
         "relayControlEnabled": bool(worker_status["relay_hardware_enabled"]) if worker_status else None,
         "relayDevicesVisible": int(worker_status["relay_device_count"]) if worker_status else None,
+        "hailoTelemetryEnabled": bool(worker_status["hailo_telemetry_enabled"]) if worker_status else None,
+        "hailoSessionCount": int(worker_status["hailo_session_count"]) if worker_status else None,
+        "hailoTelemetrySessionCount": int(worker_status["hailo_telemetry_session_count"]) if worker_status else None,
         "db": str(settings.db_path),
         "pid": os.getpid(),
     }

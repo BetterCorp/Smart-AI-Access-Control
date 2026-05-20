@@ -105,6 +105,15 @@ class HailoGStreamerProvider:
         for session in sessions:
             session.stop()
 
+    def telemetry_status(self) -> dict[str, object]:
+        with self._lock:
+            sessions = list(self._sessions.values())
+            return {
+                "enabled": self._telemetry_enabled,
+                "sessionCount": len(sessions),
+                "telemetrySessionCount": sum(1 for session in sessions if session.telemetry_enabled),
+            }
+
 
 class HailoCameraSession:
     restart_backoff_seconds = 5.0
@@ -135,7 +144,15 @@ class HailoCameraSession:
             name=f"hailo-camera-{self.camera.id}",
             daemon=True,
         )
-        self._process.start()
+        previous_monitor = os.environ.get("HAILO_MONITOR")
+        previous_interval = os.environ.get("HAILO_MONITOR_TIME_INTERVAL")
+        os.environ["HAILO_MONITOR"] = "1" if self.telemetry_enabled else "0"
+        os.environ.setdefault("HAILO_MONITOR_TIME_INTERVAL", "5000")
+        try:
+            self._process.start()
+        finally:
+            restore_env("HAILO_MONITOR", previous_monitor)
+            restore_env("HAILO_MONITOR_TIME_INTERVAL", previous_interval)
 
     def stop(self) -> None:
         process = self._process
@@ -338,7 +355,18 @@ class HailoPipelineRunner:
 def run_hailo_child(camera: CameraConfig, output_queue: Any, telemetry_enabled: bool = False) -> None:
     os.environ["HAILO_MONITOR"] = "1" if telemetry_enabled else "0"
     os.environ.setdefault("HAILO_MONITOR_TIME_INTERVAL", "5000")
+    try:
+        output_queue.put_nowait(("bus", f"Hailo telemetry enabled: {os.environ['HAILO_MONITOR']}"))
+    except Exception:
+        pass
     HailoPipelineRunner(camera, output_queue).run()
+
+
+def restore_env(key: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(key, None)
+    else:
+        os.environ[key] = value
 
 
 def format_child_exit(exitcode: int) -> str:

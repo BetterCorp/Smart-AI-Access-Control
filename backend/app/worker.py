@@ -114,15 +114,18 @@ class Worker:
             time.sleep(interval_seconds)
 
     def process_once(self) -> None:
+        hailo_status = self._sync_hailo_telemetry_state()
         self.repo.update_worker_status(
             self.inference_mode,
             self.relay_hardware_enabled,
             self.relay_probe.device_count(),
+            hailo_telemetry_enabled=bool(hailo_status.get("enabled", False)),
+            hailo_session_count=int(hailo_status.get("sessionCount", 0)),
+            hailo_telemetry_session_count=int(hailo_status.get("telemetrySessionCount", 0)),
         )
         cameras = self.repo.list_cameras()
         camera_by_id = {camera.id: camera for camera in cameras}
         monitors = self.repo.list_monitors()
-        self._sync_hailo_telemetry_state()
         prune_sessions = getattr(self.inference, "prune_sessions", None)
         if callable(prune_sessions):
             prune_sessions(monitors, camera_by_id)
@@ -181,16 +184,17 @@ class Worker:
         self._apply_relays(relay_commands)
         self.snapshot_store.prune()
 
-    def _sync_hailo_telemetry_state(self) -> None:
+    def _sync_hailo_telemetry_state(self) -> dict[str, object]:
         set_telemetry_enabled = getattr(self.inference, "set_telemetry_enabled", None)
+        telemetry_status = getattr(self.inference, "telemetry_status", None)
         if not callable(set_telemetry_enabled):
-            return
+            return {}
         monitor_support_enabled = os.environ.get("SMARTAI_ENABLE_HAILO_MONITOR", "1") == "1"
         telemetry_enabled = monitor_support_enabled and hailo_telemetry_is_active(load_settings().data_dir)
-        if telemetry_enabled == self._hailo_telemetry_enabled:
-            return
-        set_telemetry_enabled(telemetry_enabled)
-        self._hailo_telemetry_enabled = telemetry_enabled
+        if telemetry_enabled != self._hailo_telemetry_enabled:
+            set_telemetry_enabled(telemetry_enabled)
+            self._hailo_telemetry_enabled = telemetry_enabled
+        return dict(telemetry_status()) if callable(telemetry_status) else {"enabled": telemetry_enabled}
 
     def _persist_event_if_changed(
         self,

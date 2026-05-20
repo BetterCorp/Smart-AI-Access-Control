@@ -13,6 +13,9 @@
   <dt>Mock inference</dt><dd>{{ health.mockInference if health.mockInference is not none else "unknown" }}</dd>
   <dt>Relay control enabled</dt><dd>{{ health.relayControlEnabled if health.relayControlEnabled is not none else "unknown" }}</dd>
   <dt>Relay channels visible</dt><dd>{{ health.relayDevicesVisible if health.relayDevicesVisible is not none else "unknown" }}</dd>
+  <dt>Hailo telemetry requested</dt><dd>{{ health.hailoTelemetryEnabled if health.hailoTelemetryEnabled is not none else "unknown" }}</dd>
+  <dt>Hailo sessions</dt><dd>{{ health.hailoSessionCount if health.hailoSessionCount is not none else "unknown" }}</dd>
+  <dt>Hailo telemetry sessions</dt><dd>{{ health.hailoTelemetrySessionCount if health.hailoTelemetrySessionCount is not none else "unknown" }}</dd>
   <dt>Database</dt><dd><code>{{ health.db }}</code></dd>
 </dl>
 {% if health.cameraFaultDetails %}
