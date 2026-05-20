@@ -91,6 +91,8 @@ Deployment is split into two scripts:
 - install the Debian `usbrelay` CLI used by the relay driver,
 - install systemd services,
 - serve the web API with two Uvicorn worker processes,
+- enable HailoRT monitor telemetry for the worker at a conservative 5-second interval,
+- install an aggressive Raspberry Pi 5 fan curve in `/boot/firmware/config.txt`,
 - install the USB relay udev rule,
 - expose the app directly on `0.0.0.0:8000`,
 - optionally configure UFW,
@@ -136,10 +138,17 @@ sudo env \
   SMARTAI_MOCK_INFERENCE=1 \
   SMARTAI_ENABLE_RELAY_HARDWARE=0 \
   SMARTAI_ENABLE_HAILO_PACKAGES=1 \
+  SMARTAI_ENABLE_HAILO_MONITOR=1 \
+  SMARTAI_HAILO_MONITOR_INTERVAL_MS=5000 \
+  SMARTAI_ENABLE_PI_FAN_TUNING=1 \
   SMARTAI_HAILO_APPS_REF=main \
   SMARTAI_ENABLE_UFW=1 \
   /opt/smart-ai-access-control/scripts/pi-setup.sh
 ```
+
+Fan tuning writes a marked Smart AI Access Control block to `/boot/firmware/config.txt` and replaces only that block on future runs. Disable it with `SMARTAI_ENABLE_PI_FAN_TUNING=0`. The default curve starts cooling earlier than Raspberry Pi OS defaults: 40C at 50% PWM, 50C at 75% PWM, 60C at 88% PWM, and 70C at 100% PWM. A reboot is required for boot config changes to take effect.
+
+Hailo monitor telemetry is enabled with `HAILO_MONITOR=1` and `HAILO_MONITOR_TIME_INTERVAL=5000` on the worker service. The dashboard shows parsed utilization/FPS when `hailortcli monitor` reports active data, plus the raw monitor sample for troubleshooting. Disable it with `SMARTAI_ENABLE_HAILO_MONITOR=0` or change the interval with `SMARTAI_HAILO_MONITOR_INTERVAL_MS`.
 
 After setup:
 

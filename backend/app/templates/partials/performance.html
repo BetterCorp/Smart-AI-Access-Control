@@ -22,10 +22,36 @@
   </article>
 </section>
 <h4>AI Accelerator</h4>
+<section class="metric-grid">
+  <article>
+    <strong>{% if performance.hailo.utilizationPercent is not none %}{{ performance.hailo.utilizationPercent }}%{% else %}n/a{% endif %}</strong>
+    <span>Hailo utilization</span>
+    <small>{{ performance.hailo.monitorStatus }}</small>
+  </article>
+  <article>
+    <strong>{% if performance.hailo.fps is not none %}{{ performance.hailo.fps }}{% else %}n/a{% endif %}</strong>
+    <span>Hailo FPS</span>
+    <small>reported by monitor</small>
+  </article>
+  <article>
+    <strong>{{ performance.hailo.activeNetworkGroups }}</strong>
+    <span>Active network groups</span>
+    <small>reported by monitor</small>
+  </article>
+</section>
 <dl class="health-grid">
   <dt>PCIe detected</dt><dd>{{ performance.hailo.pciDetected }}</dd>
   <dt>Driver ready</dt><dd>{{ performance.hailo.driverReady }}</dd>
   <dt>Device nodes</dt><dd>{{ performance.hailo.deviceNodes|join(", ") if performance.hailo.deviceNodes else "none" }}</dd>
   <dt>Identify OK</dt><dd>{{ performance.hailo.identifyOk }}</dd>
+  <dt>Scan OK</dt><dd>{{ performance.hailo.scanOk }}</dd>
+  <dt>Scan</dt><dd>{{ performance.hailo.scanSummary or "none" }}</dd>
   <dt>Architecture</dt><dd>{{ performance.hailo.architecture or "unknown" }}</dd>
+  <dt>Monitor data</dt><dd>{{ performance.hailo.monitorOk }}</dd>
 </dl>
+{% if performance.hailo.monitorRaw %}
+  <details>
+    <summary>Raw Hailo monitor sample</summary>
+    <pre class="raw-output">{{ performance.hailo.monitorRaw }}</pre>
+  </details>
+{% endif %}

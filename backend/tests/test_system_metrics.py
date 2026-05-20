@@ -1,4 +1,4 @@
-from backend.app.system_metrics import human_bytes, memory_metrics, parse_hailo_architecture
+from backend.app.system_metrics import human_bytes, memory_metrics, parse_hailo_architecture, parse_hailo_monitor
 
 
 def test_human_bytes_formats_values() -> None:
@@ -17,3 +17,19 @@ def test_memory_metrics_reads_proc_meminfo(tmp_path) -> None:
 
 def test_parse_hailo_architecture() -> None:
     assert parse_hailo_architecture("Device Architecture: HAILO8L\n") == "HAILO8L"
+
+
+def test_parse_hailo_monitor_extracts_usage_and_fps() -> None:
+    output = """
+    Devices
+    Device Utilization 42.5%
+    Network Groups
+    yolov8s.hef FPS 18.75
+    """
+
+    metrics = parse_hailo_monitor(output)
+
+    assert metrics["hasData"] is True
+    assert metrics["utilizationPercent"] == 42.5
+    assert metrics["fps"] == 18.75
+    assert metrics["activeNetworkGroups"] == 1

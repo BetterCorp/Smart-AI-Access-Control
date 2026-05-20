@@ -7,6 +7,9 @@ MOCK_INFERENCE="${SMARTAI_MOCK_INFERENCE:-1}"
 ENABLE_RELAY_HARDWARE="${SMARTAI_ENABLE_RELAY_HARDWARE:-0}"
 ENABLE_HAILO_PACKAGES="${SMARTAI_ENABLE_HAILO_PACKAGES:-1}"
 HAILO_APPS_REF="${SMARTAI_HAILO_APPS_REF:-main}"
+ENABLE_HAILO_MONITOR="${SMARTAI_ENABLE_HAILO_MONITOR:-1}"
+HAILO_MONITOR_INTERVAL_MS="${SMARTAI_HAILO_MONITOR_INTERVAL_MS:-5000}"
+ENABLE_PI_FAN_TUNING="${SMARTAI_ENABLE_PI_FAN_TUNING:-1}"
 ENABLE_UFW="${SMARTAI_ENABLE_UFW:-1}"
 SERVICE_USER="${SMARTAI_SERVICE_USER:-smartai}"
 SERVICE_GROUP="${SMARTAI_SERVICE_GROUP:-smartai}"
@@ -136,6 +139,41 @@ print("Hailo Python bindings available")
 PY
 }
 
+configure_pi_fan() {
+  if [[ "${ENABLE_PI_FAN_TUNING}" != "1" ]]; then
+    return
+  fi
+
+  local config_path="/boot/firmware/config.txt"
+  if [[ ! -f "${config_path}" ]]; then
+    log "Skipping Pi fan tuning; ${config_path} not found"
+    return
+  fi
+
+  log "Configuring aggressive Raspberry Pi fan curve"
+  local tmp
+  tmp="$(mktemp)"
+  awk '
+    BEGIN { skip = 0 }
+    /^# BEGIN Smart AI Access Control fan curve$/ { skip = 1; next }
+    /^# END Smart AI Access Control fan curve$/ { skip = 0; next }
+    skip == 0 { print }
+  ' "${config_path}" >"${tmp}"
+  cat >>"${tmp}" <<'EOF'
+
+# BEGIN Smart AI Access Control fan curve
+# Aggressive Pi 5 active-cooler curve. Values are millicelsius and PWM 0-255.
+dtparam=fan_temp0=40000,fan_temp0_hyst=3000,fan_temp0_speed=128
+dtparam=fan_temp1=50000,fan_temp1_hyst=3000,fan_temp1_speed=192
+dtparam=fan_temp2=60000,fan_temp2_hyst=3000,fan_temp2_speed=224
+dtparam=fan_temp3=70000,fan_temp3_hyst=3000,fan_temp3_speed=255
+# END Smart AI Access Control fan curve
+EOF
+  install -m 0755 -d /boot/firmware
+  install -m 0644 "${tmp}" "${config_path}"
+  rm -f "${tmp}"
+}
+
 install_node_assets() {
   log "Building TypeScript assets"
   require_command npm
@@ -154,6 +192,8 @@ install_systemd() {
 [Service]
 Environment=SMARTAI_MOCK_INFERENCE=${MOCK_INFERENCE}
 Environment=SMARTAI_ENABLE_RELAY_HARDWARE=${ENABLE_RELAY_HARDWARE}
+Environment=HAILO_MONITOR=${ENABLE_HAILO_MONITOR}
+Environment=HAILO_MONITOR_TIME_INTERVAL=${HAILO_MONITOR_INTERVAL_MS}
 EOF
 
   systemctl daemon-reload
@@ -198,6 +238,7 @@ main() {
   ensure_user_and_dirs
   install_python_app
   verify_hailo_python
+  configure_pi_fan
   install_node_assets
   install_udev
   install_systemd

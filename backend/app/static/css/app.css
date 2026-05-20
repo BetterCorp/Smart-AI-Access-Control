@@ -100,6 +100,16 @@ body {
   margin-top: 4px;
 }
 
+.raw-output {
+  background: #f6f8fa;
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
