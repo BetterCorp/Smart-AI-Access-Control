@@ -11,16 +11,20 @@ from pathlib import Path
 from typing import Any
 
 
+HAILO_MONITOR_POLL_SECONDS = 5.0
+HAILO_TELEMETRY_IDLE_SECONDS = 30 * 60.0
+
 _HAILO_CACHE: tuple[float, dict[str, Any]] | None = None
+_HAILO_TELEMETRY_ACTIVE_UNTIL: float = 0.0
 
 
-def performance_snapshot(storage_path: Path) -> dict[str, Any]:
+def performance_snapshot(storage_path: Path, *, activate_hailo_telemetry: bool = False) -> dict[str, Any]:
     return {
         "cpu": cpu_metrics(),
         "memory": memory_metrics(),
         "storage": storage_metrics(storage_path),
         "temperature": temperature_metrics(),
-        "hailo": hailo_metrics(),
+        "hailo": hailo_metrics(activate=activate_hailo_telemetry),
     }
 
 
@@ -79,20 +83,31 @@ def temperature_metrics() -> dict[str, Any]:
     return {"available": True, "celsius": round(celsius, 1)}
 
 
-def hailo_metrics(ttl_seconds: float = 30.0) -> dict[str, Any]:
-    global _HAILO_CACHE
+def hailo_metrics(ttl_seconds: float = HAILO_MONITOR_POLL_SECONDS, *, activate: bool = False) -> dict[str, Any]:
+    global _HAILO_CACHE, _HAILO_TELEMETRY_ACTIVE_UNTIL
     now = time.monotonic()
+    if activate:
+        _HAILO_TELEMETRY_ACTIVE_UNTIL = now + HAILO_TELEMETRY_IDLE_SECONDS
+
     if _HAILO_CACHE is not None and now - _HAILO_CACHE[0] < ttl_seconds:
-        return _HAILO_CACHE[1]
+        metrics = dict(_HAILO_CACHE[1])
+        metrics["telemetryActive"] = now < _HAILO_TELEMETRY_ACTIVE_UNTIL
+        return metrics
+
+    telemetry_active = now < _HAILO_TELEMETRY_ACTIVE_UNTIL
 
     device_nodes = sorted(glob.glob("/dev/hailo*"))
     pci = run_command(["lspci", "-nn"], timeout_seconds=2.0)
     identify = run_command(["hailortcli", "fw-control", "identify"], timeout_seconds=3.0)
     scan = run_command(["hailortcli", "scan"], timeout_seconds=3.0)
-    monitor = run_command(
-        ["hailortcli", "monitor"],
-        timeout_seconds=2.0,
-        env={**os.environ, "HAILO_MONITOR": "1", "TERM": "dumb"},
+    monitor = (
+        run_command(
+            ["hailortcli", "monitor"],
+            timeout_seconds=2.0,
+            env={**os.environ, "HAILO_MONITOR": "1", "TERM": "dumb"},
+        )
+        if telemetry_active
+        else CommandResult(0)
     )
     pci_output = pci.stdout + pci.stderr
     identify_output = identify.stdout + identify.stderr
@@ -107,8 +122,9 @@ def hailo_metrics(ttl_seconds: float = 30.0) -> dict[str, Any]:
         "architecture": parse_hailo_architecture(identify_output),
         "scanOk": scan.returncode == 0 and bool(scan_output.strip()),
         "scanSummary": first_non_empty_line(scan_output),
+        "telemetryActive": telemetry_active,
         "monitorOk": monitor_stats["hasData"],
-        "monitorStatus": monitor_status(monitor, monitor_output),
+        "monitorStatus": monitor_status(monitor, monitor_output, telemetry_active=telemetry_active),
         "monitorRaw": truncate_text(monitor_output, 2500),
         "utilizationPercent": monitor_stats["utilizationPercent"],
         "fps": monitor_stats["fps"],
@@ -184,7 +200,9 @@ def parse_hailo_monitor(output: str) -> dict[str, Any]:
     }
 
 
-def monitor_status(result: CommandResult, output: str) -> str:
+def monitor_status(result: CommandResult, output: str, *, telemetry_active: bool = True) -> str:
+    if not telemetry_active:
+        return "telemetry idle"
     if result.returncode == 127:
         return "hailortcli not found"
     if output.strip():

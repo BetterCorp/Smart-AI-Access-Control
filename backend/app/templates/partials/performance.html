@@ -26,7 +26,7 @@
   <article>
     <strong>{% if performance.hailo.utilizationPercent is not none %}{{ performance.hailo.utilizationPercent }}%{% else %}n/a{% endif %}</strong>
     <span>Hailo utilization</span>
-    <small>{{ performance.hailo.monitorStatus }}</small>
+    <small>{{ performance.hailo.monitorStatus }}{% if performance.hailo.telemetryActive %} | polling every 5s{% endif %}</small>
   </article>
   <article>
     <strong>{% if performance.hailo.fps is not none %}{{ performance.hailo.fps }}{% else %}n/a{% endif %}</strong>
@@ -47,6 +47,7 @@
   <dt>Scan OK</dt><dd>{{ performance.hailo.scanOk }}</dd>
   <dt>Scan</dt><dd>{{ performance.hailo.scanSummary or "none" }}</dd>
   <dt>Architecture</dt><dd>{{ performance.hailo.architecture or "unknown" }}</dd>
+  <dt>Telemetry active</dt><dd>{{ performance.hailo.telemetryActive }}</dd>
   <dt>Monitor data</dt><dd>{{ performance.hailo.monitorOk }}</dd>
 </dl>
 {% if performance.hailo.monitorRaw %}

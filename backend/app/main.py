@@ -824,7 +824,7 @@ def health() -> dict[str, object]:
 
 @app.get("/api/system/performance")
 def performance() -> dict[str, object]:
-    return performance_snapshot(settings.data_dir)
+    return performance_snapshot(settings.data_dir, activate_hailo_telemetry=True)
 
 
 @app.get("/healthz")

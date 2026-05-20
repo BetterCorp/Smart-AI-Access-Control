@@ -26,6 +26,25 @@ function connectLiveStream(): void {
 
 document.addEventListener("DOMContentLoaded", connectLiveStream);
 
+function initTelemetryPanels(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>("[data-telemetry-url]").forEach((panel) => {
+    if (panel.dataset.telemetryReady === "true") return;
+    panel.dataset.telemetryReady = "true";
+    const url = panel.dataset.telemetryUrl;
+    if (!url) return;
+    const refresh = async (): Promise<void> => {
+      if (!document.body.contains(panel)) return;
+      const response = await fetch(url, { headers: { "HX-Request": "true" } });
+      if (!response.ok) return;
+      panel.innerHTML = await response.text();
+    };
+    window.setInterval(refresh, 5000);
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => initTelemetryPanels());
+document.addEventListener("htmx:afterSwap", (event) => initTelemetryPanels(event.target as ParentNode));
+
 function syncZoneInputs(editor: HTMLElement, x: number, y: number, width: number, height: number): void {
   const form = editor.closest("form");
   if (!form) return;
