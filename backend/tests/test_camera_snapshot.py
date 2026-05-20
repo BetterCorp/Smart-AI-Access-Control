@@ -1,10 +1,12 @@
 from types import SimpleNamespace
 
-from backend.app.camera.snapshot import capture_rtsp_jpeg, capture_rtsp_jpeg_result
+from backend.app.camera.snapshot import appsink_pipeline, capture_rtsp_jpeg, capture_rtsp_jpeg_result
 from backend.app.domain import CameraConfig
 
 
 def test_capture_rtsp_jpeg_returns_file_bytes(monkeypatch) -> None:
+    monkeypatch.setattr("backend.app.camera.snapshot.capture_rtsp_jpeg_with_appsink", lambda camera, timeout: SimpleNamespace(ok=False, error="appsink failed"))
+
     def fake_run(command, check, capture_output, timeout, text):
         output = next(item.split("=", 1)[1] for item in command if item.startswith("location=") and item.endswith(".jpg"))
         with open(output, "wb") as handle:
@@ -17,6 +19,8 @@ def test_capture_rtsp_jpeg_returns_file_bytes(monkeypatch) -> None:
 
 
 def test_capture_rtsp_jpeg_result_reports_pipeline_failure(monkeypatch) -> None:
+    monkeypatch.setattr("backend.app.camera.snapshot.capture_rtsp_jpeg_with_appsink", lambda camera, timeout: SimpleNamespace(ok=False, error="appsink failed"))
+
     def fake_run(*_args, **_kwargs):
         raise __import__("subprocess").CalledProcessError(1, "gst", stderr="decode failed")
 
@@ -26,3 +30,10 @@ def test_capture_rtsp_jpeg_result_reports_pipeline_failure(monkeypatch) -> None:
 
     assert not result.ok
     assert result.error == "decode failed"
+
+
+def test_appsink_pipeline_selects_video_stream() -> None:
+    pipeline = appsink_pipeline("rtsp://camera/live")
+
+    assert "application/x-rtp,media=video" in pipeline
+    assert "appsink name=snapshot_sink" in pipeline
