@@ -88,7 +88,7 @@ def test_hailo_pipeline_keeps_callback_before_headless_sink() -> None:
         analytics_fps=2,
     )
 
-    assert "identity name=identity_callback ! videoconvert" in pipeline
+    assert "video/x-raw,format=RGB ! identity name=identity_callback" in pipeline
     assert "hailooverlay" not in pipeline
 
 

@@ -260,6 +260,9 @@ class HailoPipelineRunner:
                 frame = self._map_debug_frame(buffer, frame_format, width, height, bindings)
             if frame is None:
                 return None
+            if self._frame_looks_blank(frame, bindings):
+                self._publish("bus", "Debug snapshot unavailable: frame was blank.")
+                return None
             bgr = frame if frame_format == "BGR" else cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             ok, encoded = cv2.imencode(".jpg", bgr)
             return encoded.tobytes() if ok else None
@@ -283,6 +286,10 @@ class HailoPipelineRunner:
             return frame[:expected].reshape((height, width, 3)).copy()
         finally:
             buffer.unmap(info)
+
+    def _frame_looks_blank(self, frame: Any, bindings: dict[str, Any]) -> bool:
+        np = bindings["np"]
+        return float(np.std(frame)) < 1.0 and (float(np.mean(frame)) < 2.0 or float(np.mean(frame)) > 253.0)
 
     def _on_bus_message(self, _bus: Any, message: Any, bindings: dict[str, Any]) -> None:
         Gst = bindings["Gst"]
@@ -529,9 +536,9 @@ def build_detection_pipeline(
         f"{source} ! "
         f"{inference_wrapper} ! "
         f"{tracker} ! "
-        f"{callback} ! "
         "videoconvert ! "
         "video/x-raw,format=RGB ! "
+        f"{callback} ! "
         "fakesink sync=false"
     )
 

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from backend.app.camera.snapshot import capture_rtsp_jpeg
 from backend.app.config import load_settings
 from backend.app.db import Database, Repository
 from backend.app.domain import (
@@ -122,6 +123,7 @@ class Worker:
         if callable(prune_sessions):
             prune_sessions(monitors, camera_by_id)
         observations_by_monitor: dict[str, list[Observation]] = {}
+        fallback_debug_by_camera: dict[str, bytes | None] = {}
 
         for monitor in monitors:
             camera = camera_by_id.get(monitor.camera_id)
@@ -138,8 +140,13 @@ class Worker:
                 observations_by_monitor[monitor.id] = observations
                 for observation in observations:
                     self.repo.record_observation(observation)
-                if result.debug_jpeg is not None:
-                    path = self.snapshot_store.write_monitor_debug_snapshot(monitor.id, result.debug_jpeg)
+                debug_jpeg = result.debug_jpeg
+                if debug_jpeg is None:
+                    if camera.id not in fallback_debug_by_camera:
+                        fallback_debug_by_camera[camera.id] = capture_rtsp_jpeg(camera)
+                    debug_jpeg = fallback_debug_by_camera[camera.id]
+                if debug_jpeg is not None:
+                    path = self.snapshot_store.write_monitor_debug_snapshot(monitor.id, debug_jpeg)
                     self.repo.save_monitor_debug_snapshot(monitor.id, path, datetime.now(timezone.utc))
                 self.repo.update_monitor_runtime(
                     monitor.id,
