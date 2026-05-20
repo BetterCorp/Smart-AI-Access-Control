@@ -827,7 +827,15 @@ def health() -> dict[str, object]:
 
 @app.get("/api/system/performance")
 def performance() -> dict[str, object]:
-    return performance_snapshot(settings.data_dir, activate_hailo_telemetry=True)
+    worker_status = repo.get_worker_status()
+    real_inference_active = bool(worker_status and worker_status["inference_mode"] == "real")
+    reason = None if real_inference_active else "real inference not active"
+    return performance_snapshot(
+        settings.data_dir,
+        activate_hailo_telemetry=True,
+        hailo_telemetry_allowed=real_inference_active,
+        hailo_telemetry_disabled_reason=reason,
+    )
 
 
 @app.get("/healthz")

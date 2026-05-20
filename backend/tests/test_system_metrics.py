@@ -91,3 +91,28 @@ def test_hailo_monitor_probe_runs_when_telemetry_is_active(monkeypatch, tmp_path
     assert ["hailortcli", "monitor"] in commands
     assert metrics["utilizationPercent"] == 25.0
     assert metrics["fps"] == 8.0
+
+
+def test_hailo_monitor_probe_is_disabled_when_telemetry_not_allowed(monkeypatch, tmp_path) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], timeout_seconds: float, env=None) -> CommandResult:
+        commands.append(command)
+        return CommandResult(0, stdout="Device Architecture: HAILO8L\n")
+
+    monkeypatch.setattr("backend.app.system_metrics._HAILO_CACHE", None)
+    monkeypatch.setattr("backend.app.system_metrics.glob.glob", lambda pattern: ["/dev/hailo0"])
+    monkeypatch.setattr("backend.app.system_metrics.run_command", fake_run)
+    mark_hailo_telemetry_active(tmp_path)
+
+    metrics = hailo_metrics(
+        tmp_path,
+        ttl_seconds=0,
+        telemetry_allowed=False,
+        disabled_reason="real inference not active",
+    )
+
+    assert metrics["telemetryAllowed"] is False
+    assert metrics["telemetryActive"] is False
+    assert metrics["monitorStatus"] == "real inference not active"
+    assert ["hailortcli", "monitor"] not in commands

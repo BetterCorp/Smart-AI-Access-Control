@@ -15,18 +15,28 @@ HAILO_MONITOR_POLL_SECONDS = 5.0
 HAILO_TELEMETRY_IDLE_SECONDS = 30 * 60.0
 HAILO_TELEMETRY_FILE = "hailo-telemetry.active"
 
-_HAILO_CACHE: tuple[float, dict[str, Any]] | None = None
+_HAILO_CACHE: tuple[float, bool, dict[str, Any]] | None = None
 
 
-def performance_snapshot(storage_path: Path, *, activate_hailo_telemetry: bool = False) -> dict[str, Any]:
-    if activate_hailo_telemetry:
+def performance_snapshot(
+    storage_path: Path,
+    *,
+    activate_hailo_telemetry: bool = False,
+    hailo_telemetry_allowed: bool = True,
+    hailo_telemetry_disabled_reason: str | None = None,
+) -> dict[str, Any]:
+    if activate_hailo_telemetry and hailo_telemetry_allowed:
         mark_hailo_telemetry_active(storage_path)
     return {
         "cpu": cpu_metrics(),
         "memory": memory_metrics(),
         "storage": storage_metrics(storage_path),
         "temperature": temperature_metrics(),
-        "hailo": hailo_metrics(storage_path),
+        "hailo": hailo_metrics(
+            storage_path,
+            telemetry_allowed=hailo_telemetry_allowed,
+            disabled_reason=hailo_telemetry_disabled_reason,
+        ),
     }
 
 
@@ -105,14 +115,23 @@ def telemetry_state_path(storage_path: Path) -> Path:
     return storage_path / HAILO_TELEMETRY_FILE
 
 
-def hailo_metrics(storage_path: Path, ttl_seconds: float = HAILO_MONITOR_POLL_SECONDS) -> dict[str, Any]:
+def hailo_metrics(
+    storage_path: Path,
+    ttl_seconds: float = HAILO_MONITOR_POLL_SECONDS,
+    *,
+    telemetry_allowed: bool = True,
+    disabled_reason: str | None = None,
+) -> dict[str, Any]:
     global _HAILO_CACHE
     now = time.monotonic()
-    telemetry_active = hailo_telemetry_is_active(storage_path)
+    telemetry_active = telemetry_allowed and hailo_telemetry_is_active(storage_path)
 
-    if _HAILO_CACHE is not None and now - _HAILO_CACHE[0] < ttl_seconds:
-        metrics = dict(_HAILO_CACHE[1])
+    if _HAILO_CACHE is not None and _HAILO_CACHE[1] == telemetry_active and now - _HAILO_CACHE[0] < ttl_seconds:
+        metrics = dict(_HAILO_CACHE[2])
+        metrics["telemetryAllowed"] = telemetry_allowed
         metrics["telemetryActive"] = telemetry_active
+        if not telemetry_allowed:
+            metrics.update(disabled_monitor_metrics(disabled_reason))
         return metrics
 
     device_nodes = sorted(glob.glob("/dev/hailo*"))
@@ -141,17 +160,37 @@ def hailo_metrics(storage_path: Path, ttl_seconds: float = HAILO_MONITOR_POLL_SE
         "architecture": parse_hailo_architecture(identify_output),
         "scanOk": scan.returncode == 0 and bool(scan_output.strip()),
         "scanSummary": first_non_empty_line(scan_output),
+        "telemetryAllowed": telemetry_allowed,
         "telemetryActive": telemetry_active,
         "monitorOk": monitor_stats["hasData"],
-        "monitorStatus": monitor_status(monitor, monitor_output, telemetry_active=telemetry_active),
+        "monitorStatus": monitor_status(
+            monitor,
+            monitor_output,
+            telemetry_active=telemetry_active,
+            disabled_reason=disabled_reason if not telemetry_allowed else None,
+        ),
         "monitorRaw": truncate_text(monitor_output, 2500),
         "monitorNoFiles": monitor_stats["noFiles"],
         "utilizationPercent": monitor_stats["utilizationPercent"],
         "fps": monitor_stats["fps"],
         "activeNetworkGroups": monitor_stats["activeNetworkGroups"],
     }
-    _HAILO_CACHE = (now, metrics)
+    if not telemetry_allowed:
+        metrics.update(disabled_monitor_metrics(disabled_reason))
+    _HAILO_CACHE = (now, telemetry_active, metrics)
     return metrics
+
+
+def disabled_monitor_metrics(reason: str | None) -> dict[str, Any]:
+    return {
+        "monitorOk": False,
+        "monitorStatus": reason or "telemetry disabled",
+        "monitorRaw": "",
+        "monitorNoFiles": False,
+        "utilizationPercent": None,
+        "fps": None,
+        "activeNetworkGroups": 0,
+    }
 
 
 @dataclass(frozen=True)
@@ -224,7 +263,15 @@ def parse_hailo_monitor(output: str) -> dict[str, Any]:
     }
 
 
-def monitor_status(result: CommandResult, output: str, *, telemetry_active: bool = True) -> str:
+def monitor_status(
+    result: CommandResult,
+    output: str,
+    *,
+    telemetry_active: bool = True,
+    disabled_reason: str | None = None,
+) -> str:
+    if disabled_reason:
+        return disabled_reason
     if not telemetry_active:
         return "telemetry idle"
     if result.returncode == 127:
