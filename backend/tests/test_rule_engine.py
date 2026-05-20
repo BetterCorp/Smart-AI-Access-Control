@@ -66,19 +66,19 @@ def test_rule_fault_emits_fault_actions() -> None:
     assert result.actions == [action]
 
 
-def test_rule_supports_boolean_visibility_conditions() -> None:
+def test_rule_supports_boolean_presence_conditions() -> None:
     engine = RuleEngine()
     action = RelayAction("relay-1", RelayDesiredState.ON)
     rule = RuleConfig(
-        id="rule-weapon",
-        name="Weapon visible",
+        id="rule-present",
+        name="Person present",
         enabled=True,
         priority=100,
-        monitor_id="mon-weapon",
-        condition_group=ConditionGroup("all", [RuleCondition("weapon.visible", "is_true", True)]),
+        monitor_id="mon-present",
+        condition_group=ConditionGroup("all", [RuleCondition("person.present", "is_true", True)]),
         true_actions=[action],
     )
-    observations = [Observation("core.weapon_visibility", "cam-1", "weapon.visible", True, monitor_id="mon-weapon")]
+    observations = [Observation("core.object_count", "cam-1", "person.present", True, monitor_id="mon-present")]
 
     result = engine.evaluate(rule, observations, datetime(2026, 5, 15, tzinfo=timezone.utc))
 

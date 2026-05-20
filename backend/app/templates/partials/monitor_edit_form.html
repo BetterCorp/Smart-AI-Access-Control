@@ -1,11 +1,18 @@
 <section id="monitor-edit-panel" class="panel">
   <h3>Edit Monitor</h3>
-  <form class="form-grid" hx-post="/ui/monitors/{{ monitor.id }}" hx-target="#monitors-table" hx-swap="outerHTML">
+  <form
+    class="form-grid"
+    hx-post="/ui/monitors/{{ monitor.id }}"
+    hx-target="#monitors-table"
+    hx-swap="outerHTML"
+    hx-on::after-request="if(event.detail.successful){document.querySelector('#monitor-edit-slot').innerHTML=''}"
+  >
     <label>Name <input name="name" required value="{{ monitor.name }}"></label>
-    <label>Model
-      <select name="model_id">
-        {% for model in models %}
-        <option value="{{ model.id }}" {% if model.id == monitor.model_id %}selected{% endif %}>{{ model.name }}</option>
+    <input type="hidden" name="model_id" value="object_detector">
+    <label>Template
+      <select name="class_name">
+        {% for template in templates %}
+        <option value="{{ template.class_name }}" {% if template.class_name == monitor.config.class_name %}selected{% endif %}>{{ template.name }}</option>
         {% endfor %}
       </select>
     </label>
@@ -16,7 +23,6 @@
         {% endfor %}
       </select>
     </label>
-    <label>Class <input name="class_name" value="{{ monitor.config.class_name or 'person' }}"></label>
     <label>Confidence
       <input
         name="confidence_threshold"
@@ -27,6 +33,30 @@
         value="{{ monitor.config.confidence_threshold or 0.5 }}"
       >
     </label>
+    {% set zone = monitor.config.zone or {} %}
+    <label>Zone Name <input name="zone_id" value="{{ monitor.config.zone_id or 'zone-1' }}"></label>
+    <label class="checkbox-label">
+      <input name="zone_enabled" type="checkbox" {% if monitor.config.zone %}checked{% endif %}>
+      Enable Zone
+    </label>
+    <input name="zone_x" type="hidden" value="{{ zone.x or 0 }}">
+    <input name="zone_y" type="hidden" value="{{ zone.y or 0 }}">
+    <input name="zone_width" type="hidden" value="{{ zone.width or 0 }}">
+    <input name="zone_height" type="hidden" value="{{ zone.height or 0 }}">
     <button type="submit">Save Monitor</button>
+    {% if debug_snapshot %}
+    <section
+      class="zone-editor"
+      data-zone-editor
+      data-zone-x="{{ zone.x or 0 }}"
+      data-zone-y="{{ zone.y or 0 }}"
+      data-zone-width="{{ zone.width or 0 }}"
+      data-zone-height="{{ zone.height or 0 }}"
+    >
+      <img src="/api/monitors/{{ monitor.id }}/debug-snapshot" alt="">
+      <div class="zone-box"></div>
+    </section>
+    <button type="button" data-clear-zone>Clear Zone</button>
+    {% endif %}
   </form>
 </section>

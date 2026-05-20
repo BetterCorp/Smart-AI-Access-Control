@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from backend.app.db import Database, Repository
 from backend.app.domain import CameraConfig, ConditionGroup, InferenceResult, MonitorConfig, Observation, RelayAction, RelayDesiredState, RuleCondition, RuleConfig
 from backend.app.storage.snapshots import SnapshotStore, StorageConfig
@@ -9,7 +11,7 @@ def test_worker_creates_snapshot_event_and_updates_relay(tmp_path) -> None:
     repo = Repository(db)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     repo.save_camera(camera)
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
     repo.save_rule(
         RuleConfig(
             id="rule-1",
@@ -49,7 +51,7 @@ def test_worker_dedupes_unchanged_rule_event(tmp_path) -> None:
     repo = Repository(db)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     repo.save_camera(camera)
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
     repo.save_rule(
         RuleConfig(
             id="rule-1",
@@ -72,34 +74,34 @@ def test_worker_dedupes_unchanged_rule_event(tmp_path) -> None:
     assert len(repo.list_events()) == 1
 
 
-def test_worker_evaluates_boolean_weapon_monitor(tmp_path) -> None:
+def test_worker_evaluates_boolean_presence_monitor(tmp_path) -> None:
     db = Database(tmp_path / "smartai.db")
     repo = Repository(db)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     repo.save_camera(camera)
-    repo.save_monitor(MonitorConfig("mon-weapon", "Entrance weapons", "weapon_visibility", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-present", "Entrance people", "object_detector", "cam-1"))
     repo.save_rule(
         RuleConfig(
-            id="rule-weapon",
-            name="Weapon visible",
+            id="rule-present",
+            name="People visible",
             enabled=True,
             priority=100,
-            monitor_id="mon-weapon",
-            condition_group=ConditionGroup("all", [RuleCondition("weapon.visible", "is_true", True)]),
+            monitor_id="mon-present",
+            condition_group=ConditionGroup("all", [RuleCondition("person.present", "is_true", True)]),
             true_actions=[RelayAction("relay-1", RelayDesiredState.ON)],
         )
     )
     worker = Worker(
         repo,
         SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
-        MockInferenceProvider({"mon-weapon": 1}),
+        MockInferenceProvider({"mon-present": 1}),
     )
 
     worker.process_once()
 
     events = repo.list_events()
     assert len(events) == 1
-    assert events[0]["metric"] == "weapon.visible"
+    assert events[0]["metric"] == "person.present"
     with db.connect() as conn:
         row = conn.execute("SELECT current_state FROM relay_channels WHERE id = 'relay-1'").fetchone()
     assert row["current_state"] == "on"
@@ -126,7 +128,7 @@ def test_worker_stores_monitor_debug_snapshot(tmp_path) -> None:
     repo = Repository(Database(tmp_path / "smartai.db"))
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     repo.save_camera(camera)
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
     worker = Worker(
         repo,
         SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
@@ -140,6 +142,35 @@ def test_worker_stores_monitor_debug_snapshot(tmp_path) -> None:
     assert rows[0]["monitor_id"] == "mon-1"
 
 
+def test_worker_uses_monitor_debug_snapshot_for_rule_event(tmp_path) -> None:
+    db = Database(tmp_path / "smartai.db")
+    repo = Repository(db)
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    repo.save_camera(camera)
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
+    repo.save_rule(
+        RuleConfig(
+            id="rule-1",
+            name="Mantrap",
+            enabled=True,
+            priority=100,
+            monitor_id="mon-1",
+            condition_group=ConditionGroup("all", [RuleCondition("person.count", ">=", 2)]),
+        )
+    )
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        DebugInferenceProvider(),
+    )
+
+    worker.process_once()
+
+    event = repo.list_events()[0]
+    assert event["snapshot_path"]
+    assert Path(event["snapshot_path"]).read_bytes() == b"debug-jpeg"
+
+
 class FailingInferenceProvider:
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         raise RuntimeError("Waiting for first Hailo frame from the RTSP pipeline (1s).")
@@ -149,7 +180,7 @@ def test_worker_records_waiting_monitor_runtime(tmp_path) -> None:
     repo = Repository(Database(tmp_path / "smartai.db"))
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     repo.save_camera(camera)
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
     worker = Worker(
         repo,
         SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
@@ -176,7 +207,7 @@ def test_worker_keeps_running_when_relay_write_fails(tmp_path) -> None:
     repo = Repository(db)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     repo.save_camera(camera)
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
     repo.save_rule(
         RuleConfig(
             id="rule-1",

@@ -37,12 +37,12 @@ class HailoGStreamerProvider:
         self._lock = threading.Lock()
 
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
-        if monitor.model_id != "person_counter":
+        if monitor.model_id not in {"object_detector", "person_counter"}:
             raise RuntimeError(
                 f"{monitor.model_id} needs a dedicated Hailo detector before it can run in real inference mode."
             )
 
-        fingerprint = self.session_fingerprint(camera, monitor.model_id)
+        fingerprint = self.session_fingerprint(camera, "yolov8s")
         with self._lock:
             session = self._sessions.get(fingerprint)
             if session is None:
@@ -65,10 +65,10 @@ class HailoGStreamerProvider:
 
     def prune_sessions(self, monitors: list[MonitorConfig], cameras: dict[str, CameraConfig]) -> None:
         active = {
-            self.session_fingerprint(camera, monitor.model_id)
+            self.session_fingerprint(camera, "yolov8s")
             for monitor in monitors
             if monitor.enabled
-            if monitor.model_id == "person_counter"
+            if monitor.model_id in {"object_detector", "person_counter"}
             if (camera := cameras.get(monitor.camera_id)) is not None
         }
         with self._lock:
@@ -254,15 +254,35 @@ class HailoPipelineRunner:
             frame_format, width, height = get_caps_from_pad(pad)
             if frame_format is None or width is None or height is None:
                 return None
-            frame = get_numpy_from_buffer(buffer, frame_format, width, height)
+            try:
+                frame = get_numpy_from_buffer(buffer, frame_format, width, height)
+            except Exception:
+                frame = self._map_debug_frame(buffer, frame_format, width, height, bindings)
             if frame is None:
                 return None
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            bgr = frame if frame_format == "BGR" else cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             ok, encoded = cv2.imencode(".jpg", bgr)
             return encoded.tobytes() if ok else None
         except Exception as exc:
             self._publish("bus", f"Debug snapshot unavailable: {exc}")
             return None
+
+    def _map_debug_frame(self, buffer: Any, frame_format: str, width: int, height: int, bindings: dict[str, Any]) -> Any:
+        if frame_format not in {"RGB", "BGR"}:
+            return None
+        Gst = bindings["Gst"]
+        np = bindings["np"]
+        ok, info = buffer.map(Gst.MapFlags.READ)
+        if not ok:
+            return None
+        try:
+            expected = width * height * 3
+            frame = np.frombuffer(info.data, dtype=np.uint8)
+            if frame.size < expected:
+                return None
+            return frame[:expected].reshape((height, width, 3)).copy()
+        finally:
+            buffer.unmap(info)
 
     def _on_bus_message(self, _bus: Any, message: Any, bindings: dict[str, Any]) -> None:
         Gst = bindings["Gst"]
@@ -316,6 +336,8 @@ def observations_for(
     config = ObjectCountConfig(
         class_name=str(monitor.config.get("class_name", "person")),
         confidence_threshold=float(monitor.config.get("confidence_threshold", 0.5)),
+        zone_id=str(monitor.config.get("zone_id")) if monitor.config.get("zone_id") else None,
+        zone=monitor_zone(monitor),
     )
     observations = ObjectCountPlugin().on_detections(camera, detections, config)
     return [
@@ -329,9 +351,30 @@ def observations_for(
             model_id=monitor.model_id,
             zone_id=observation.zone_id,
             labels=observation.labels,
+            metadata=observation.metadata,
         )
         for observation in observations
     ]
+
+
+def monitor_zone(monitor: MonitorConfig) -> tuple[float, float, float, float] | None:
+    raw_zone = monitor.config.get("zone")
+    if not isinstance(raw_zone, dict):
+        return None
+    try:
+        x = float(raw_zone["x"])
+        y = float(raw_zone["y"])
+        width = float(raw_zone["width"])
+        height = float(raw_zone["height"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    x = min(max(x, 0.0), 1.0)
+    y = min(max(y, 0.0), 1.0)
+    width = min(width, 1.0 - x)
+    height = min(height, 1.0 - y)
+    return (x, y, width, height)
 
 
 def detection_from_hailo(raw_detection: Any) -> Detection:
@@ -356,6 +399,7 @@ def load_hailo_bindings() -> dict[str, Any]:
         from gi.repository import GLib, Gst
         import cv2
         import hailo
+        import numpy as np
         from hailo_apps.python.core.common.buffer_utils import get_caps_from_pad, get_numpy_from_buffer
         from hailo_apps.python.core.common.core import get_resource_path, resolve_hef_path
         from hailo_apps.python.core.common.defines import (
@@ -389,6 +433,7 @@ def load_hailo_bindings() -> dict[str, Any]:
         "GLib": GLib,
         "Gst": Gst,
         "cv2": cv2,
+        "np": np,
         "hailo": hailo,
         "get_caps_from_pad": get_caps_from_pad,
         "get_numpy_from_buffer": get_numpy_from_buffer,

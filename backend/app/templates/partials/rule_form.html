@@ -1,0 +1,108 @@
+<form class="panel rule-designer" hx-post="{{ action_url }}" hx-target="#rules-table" hx-swap="outerHTML">
+  <h3>{{ submit_label }}</h3>
+  <section>
+    <h4>Rule</h4>
+    <div class="form-grid">
+      <label>Name <input name="name" required value="{{ form.name }}" placeholder="Mantrap occupancy"></label>
+      <label>Priority <input name="priority" type="number" value="{{ form.priority }}" min="0"></label>
+      <label class="checkbox-label">
+        <input name="enabled" type="checkbox" {% if form.enabled %}checked{% endif %}>
+        Enabled
+      </label>
+    </div>
+  </section>
+
+  <section>
+    <h4>Condition</h4>
+    <div class="form-grid">
+      <label>Monitor
+        <select name="monitor_id" required data-rule-monitor-select>
+          {% for monitor in monitors %}
+          <option value="{{ monitor.id }}" {% if monitor.id == form.monitor_id %}selected{% endif %}>{{ monitor.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Metric
+        <select name="metric" data-rule-metric-select>
+          {% for option in metric_options %}
+          <option value="{{ option.metric }}" data-monitor-id="{{ option.monitor_id }}" {% if option.metric == form.metric and option.monitor_id == form.monitor_id %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Operator
+        <select name="operator">
+          {% for item in [">=", ">", "==", "!=", "<", "<=", "is_true", "is_false"] %}
+          <option value="{{ item }}" {% if item == form.operator %}selected{% endif %}>{{ item.replace("_", " ") }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Value <input name="value" value="{{ form.value }}"></label>
+    </div>
+  </section>
+
+  <section>
+    <h4>Outputs</h4>
+    <div class="form-grid">
+      <label>When True Relay
+        <select name="true_relay_id">
+          <option value="">No relay</option>
+          {% for relay in relays %}
+          <option value="{{ relay.id }}" {% if relay.id == form.true_relay_id %}selected{% endif %}>{{ relay.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>True Relay State
+        <select name="true_relay_state">
+          <option value="on" {% if form.true_relay_state == "on" %}selected{% endif %}>On</option>
+          <option value="off" {% if form.true_relay_state == "off" %}selected{% endif %}>Off</option>
+        </select>
+      </label>
+      <label>When False Relay
+        <select name="false_relay_id">
+          <option value="">No relay</option>
+          {% for relay in relays %}
+          <option value="{{ relay.id }}" {% if relay.id == form.false_relay_id %}selected{% endif %}>{{ relay.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>False Relay State
+        <select name="false_relay_state">
+          <option value="off" {% if form.false_relay_state == "off" %}selected{% endif %}>Off</option>
+          <option value="on" {% if form.false_relay_state == "on" %}selected{% endif %}>On</option>
+        </select>
+      </label>
+      <label>Webhook URL <input name="webhook_url" type="url" value="{{ form.webhook_url }}" placeholder="https://receiver.example/hook"></label>
+      <label>Snapshot Mode
+        <select name="webhook_snapshot_delivery">
+          <option value="multipart" {% if form.webhook_snapshot_delivery == "multipart" %}selected{% endif %}>Multipart JPEG</option>
+          <option value="base64_json" {% if form.webhook_snapshot_delivery == "base64_json" %}selected{% endif %}>Base64 JSON</option>
+          <option value="url_only" {% if form.webhook_snapshot_delivery == "url_only" %}selected{% endif %}>URL only</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section>
+    <h4>Timing And Failure</h4>
+    <div class="form-grid">
+      <label>True Debounce ms <input name="debounce_true_ms" type="number" value="{{ form.debounce_true_ms }}" min="0"></label>
+      <label>False Debounce ms <input name="debounce_false_ms" type="number" value="{{ form.debounce_false_ms }}" min="0"></label>
+      <label>Cooldown ms <input name="cooldown_ms" type="number" value="{{ form.cooldown_ms }}" min="0"></label>
+      <label>Fail Policy
+        <select name="fail_policy">
+          <option value="global" {% if form.fail_policy == "global" %}selected{% endif %}>Global</option>
+          <option value="fail_off" {% if form.fail_policy == "fail_off" %}selected{% endif %}>Fail off</option>
+          <option value="fail_on" {% if form.fail_policy == "fail_on" %}selected{% endif %}>Fail on</option>
+          <option value="hold_state" {% if form.fail_policy == "hold_state" %}selected{% endif %}>Hold state</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <button type="submit">{{ submit_label }}</button>
+    {% if rule %}
+    <button type="button" hx-get="/rules" hx-target="#rule-edit-slot" hx-select="#rule-edit-slot > form" hx-swap="innerHTML">Cancel</button>
+    {% endif %}
+  </div>
+</form>

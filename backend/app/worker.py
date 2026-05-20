@@ -48,21 +48,22 @@ class MockInferenceProvider:
     counts: dict[str, int]
 
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
-        if monitor.model_id == "weapon_visibility":
-            visible = bool(self.counts.get(monitor.id, self.counts.get(camera.id, 0)))
-            count = 1 if visible else 0
-            return InferenceResult(
-                [
-                    Observation("core.weapon_visibility", camera.id, "weapon.visible", visible, monitor_id=monitor.id, model_id=monitor.model_id),
-                    Observation("core.weapon_visibility", camera.id, "weapon.count", count, monitor_id=monitor.id, model_id=monitor.model_id),
-                ]
-            )
-
         count = self.counts.get(monitor.id, self.counts.get(camera.id, 0))
         class_name = str(monitor.config.get("class_name", "person"))
         confidence = float(monitor.config.get("confidence_threshold", 0.5))
         detections = [Detection(class_name, 0.9, (0.1 + index * 0.05, 0.1, 0.2, 0.5)) for index in range(max(0, count))]
-        observations = ObjectCountPlugin().on_detections(camera, detections, ObjectCountConfig(class_name, confidence))
+        from backend.app.inference.hailo import monitor_zone
+
+        observations = ObjectCountPlugin().on_detections(
+            camera,
+            detections,
+            ObjectCountConfig(
+                class_name,
+                confidence,
+                zone_id=str(monitor.config.get("zone_id")) if monitor.config.get("zone_id") else None,
+                zone=monitor_zone(monitor),
+            ),
+        )
         return InferenceResult(
             [
                 Observation(
@@ -75,6 +76,7 @@ class MockInferenceProvider:
                     model_id=monitor.model_id,
                     zone_id=observation.zone_id,
                     labels=observation.labels,
+                    metadata=observation.metadata,
                 )
                 for observation in observations
             ]
@@ -190,7 +192,7 @@ class Worker:
             return actions
 
         eid = event_id()
-        snapshot = self.snapshot_store.write_snapshot(eid, ONE_PIXEL_JPEG)
+        snapshot = self.snapshot_store.write_snapshot(eid, self._snapshot_bytes_for(observation))
         self.repo.create_event(
             event_id=eid,
             camera_id=observation.camera_id,
@@ -203,6 +205,15 @@ class Worker:
         )
         self.repo.update_rule_runtime(rule.id, state, observation.value, dedupe_key)
         return actions
+
+    def _snapshot_bytes_for(self, observation: Observation) -> bytes:
+        if observation.monitor_id is not None:
+            row = self.repo.get_monitor_debug_snapshot(observation.monitor_id)
+            if row is not None:
+                path = Path(row["path"])
+                if path.exists():
+                    return path.read_bytes()
+        return ONE_PIXEL_JPEG
 
     def _relay_commands(self, rule: RuleConfig, actions: list[Action]) -> list[RelayCommand]:
         commands = []
@@ -306,6 +317,7 @@ def observation_to_json(observation: Observation) -> dict[str, object]:
         "value": observation.value,
         "zoneId": observation.zone_id,
         "labels": observation.labels,
+        "metadata": observation.metadata,
         "timestamp": observation.timestamp.isoformat(),
     }
 

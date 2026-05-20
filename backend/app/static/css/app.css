@@ -93,6 +93,66 @@ label {
   color: #3f4d5b;
 }
 
+.checkbox-label {
+  align-content: end;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.zone-editor {
+  grid-column: 1 / -1;
+  position: relative;
+  width: min(100%, 900px);
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.zone-editor img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.zone-box {
+  position: absolute;
+  border: 2px solid #db4d37;
+  background: rgb(219 77 55 / 18%);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.rule-designer {
+  display: grid;
+  gap: 16px;
+}
+
+.rule-designer h3,
+.rule-designer h4 {
+  margin: 0 0 8px;
+}
+
+.rule-designer section {
+  border-top: 1px solid #e2e7ec;
+  padding-top: 12px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.snapshot-view img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  background: #111;
+}
+
 input,
 select,
 button {

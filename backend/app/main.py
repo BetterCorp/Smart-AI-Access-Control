@@ -26,7 +26,7 @@ from backend.app.domain import (
     SnapshotDelivery,
     WebhookAction,
 )
-from backend.app.models import MODEL_DEFINITIONS, model_options
+from backend.app.models import MODEL_DEFINITIONS, model_options, monitor_templates
 from backend.app.plugins.object_count import ObjectCountPlugin
 
 
@@ -136,6 +136,7 @@ def monitors_page(request: Request) -> HTMLResponse:
             "monitors": repo.list_monitors(),
             "cameras": repo.list_cameras(),
             "models": model_options(),
+            "templates": monitor_templates(),
             "monitor_states": repo.list_monitor_states(),
             "monitor_debug_snapshots": repo.list_monitor_debug_snapshots(),
             "monitor_runtime_rows": repo.list_monitor_runtime_rows(),
@@ -192,6 +193,8 @@ def edit_monitor_form(request: Request, monitor_id: str) -> HTMLResponse:
             "monitor": monitor,
             "cameras": repo.list_cameras(),
             "models": model_options(),
+            "templates": monitor_templates(),
+            "debug_snapshot": repo.get_monitor_debug_snapshot(monitor_id),
         },
     )
 
@@ -200,7 +203,7 @@ def edit_monitor_form(request: Request, monitor_id: str) -> HTMLResponse:
 def create_monitor(
     request: Request,
     name: str = Form(...),
-    model_id: str = Form(...),
+    model_id: str = Form("object_detector"),
     camera_id: str = Form(...),
     class_name: str = Form("person"),
     confidence_threshold: float = Form(0.5),
@@ -227,10 +230,16 @@ def update_monitor(
     request: Request,
     monitor_id: str,
     name: str = Form(...),
-    model_id: str = Form(...),
+    model_id: str = Form("object_detector"),
     camera_id: str = Form(...),
     class_name: str = Form("person"),
     confidence_threshold: float = Form(0.5),
+    zone_enabled: str | None = Form(None),
+    zone_id: str = Form("zone-1"),
+    zone_x: float = Form(0),
+    zone_y: float = Form(0),
+    zone_width: float = Form(0),
+    zone_height: float = Form(0),
 ) -> Response:
     existing = repo.get_monitor(monitor_id)
     if existing is None:
@@ -239,6 +248,10 @@ def update_monitor(
         raise HTTPException(status_code=400, detail="unknown model")
     if repo.get_camera(camera_id) is None:
         raise HTTPException(status_code=400, detail="unknown camera")
+    config: dict[str, object] = {"class_name": class_name, "confidence_threshold": confidence_threshold}
+    if zone_enabled and zone_width > 0 and zone_height > 0:
+        config["zone_id"] = zone_id or "zone-1"
+        config["zone"] = normalized_zone(zone_x, zone_y, zone_width, zone_height)
     repo.save_monitor(
         MonitorConfig(
             id=monitor_id,
@@ -246,7 +259,7 @@ def update_monitor(
             model_id=model_id,
             camera_id=camera_id,
             enabled=existing.enabled,
-            config={"class_name": class_name, "confidence_threshold": confidence_threshold},
+            config=config,
         )
     )
     if wants_fragment(request):
@@ -270,7 +283,23 @@ def monitor_debug_snapshot(monitor_id: str) -> FileResponse:
     path = Path(row["path"])
     if not path.exists():
         raise HTTPException(status_code=404)
-    return FileResponse(path, media_type=row["mime_type"], filename=path.name)
+    return FileResponse(path, media_type=row["mime_type"], headers={"Content-Disposition": "inline"})
+
+
+@app.get("/monitors/{monitor_id}/debug-snapshot", response_class=HTMLResponse)
+def monitor_debug_snapshot_page(request: Request, monitor_id: str) -> HTMLResponse:
+    row = repo.get_monitor_debug_snapshot(monitor_id)
+    if row is None:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "pages/snapshot.html",
+        {
+            "title": "Monitor Debug Snapshot",
+            "subtitle": row["observed_at"],
+            "image_url": f"/api/monitors/{monitor_id}/debug-snapshot",
+        },
+    )
 
 
 @app.get("/cameras", response_class=HTMLResponse)
@@ -340,34 +369,126 @@ def rules_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "pages/rules.html",
-        {"rules": repo.list_rules(), "monitors": repo.list_monitors(), "models": MODEL_DEFINITIONS, "relays": repo.list_relays()},
+        rule_template_context(request, action_url="/ui/rules", submit_label="Add Rule"),
     )
 
 
 @app.get("/ui/rules/table", response_class=HTMLResponse)
 def rules_table(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "partials/rules_table.html", {"rules": repo.list_rules()})
+    return templates.TemplateResponse(request, "partials/rules_table.html", rules_table_context())
 
 
-@app.post("/ui/rules", response_class=HTMLResponse)
-def create_rule(
+@app.get("/ui/rules/{rule_id}/edit", response_class=HTMLResponse)
+def edit_rule_form(request: Request, rule_id: str) -> HTMLResponse:
+    rule = repo.get_rule(rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "partials/rule_form.html",
+        rule_template_context(
+            request,
+            rule=rule,
+            action_url=f"/ui/rules/{rule.id}",
+            submit_label="Save Rule",
+        ),
+    )
+
+
+def rules_table_context() -> dict[str, object]:
+    monitors = repo.list_monitors()
+    return {
+        "rules": repo.list_rules(),
+        "monitors_by_id": {monitor.id: monitor for monitor in monitors},
+    }
+
+
+def rule_template_context(
     request: Request,
-    name: str = Form(...),
-    monitor_id: str = Form(...),
-    metric: str = Form("person.count"),
-    operator: str = Form(">="),
-    value: str = Form("2"),
-    true_relay_id: str = Form(""),
-    true_relay_state: RelayDesiredState = Form(RelayDesiredState.ON),
-    false_relay_id: str = Form(""),
-    false_relay_state: RelayDesiredState = Form(RelayDesiredState.OFF),
-    webhook_url: str = Form(""),
-    webhook_snapshot_delivery: SnapshotDelivery = Form(SnapshotDelivery.MULTIPART),
-    debounce_true_ms: int = Form(500),
-    debounce_false_ms: int = Form(500),
-    cooldown_ms: int = Form(1000),
-    fail_policy: FailPolicy = Form(FailPolicy.GLOBAL),
-) -> Response:
+    *,
+    action_url: str,
+    submit_label: str,
+    rule: RuleConfig | None = None,
+) -> dict[str, object]:
+    monitors = repo.list_monitors()
+    return {
+        "request": request,
+        **rules_table_context(),
+        "rule": rule,
+        "monitors": monitors,
+        "metric_options": monitor_metric_options(monitors),
+        "relays": repo.list_relays(),
+        "action_url": action_url,
+        "submit_label": submit_label,
+        "form": rule_form_values(rule),
+    }
+
+
+def monitor_metric_options(monitors: list[MonitorConfig]) -> list[dict[str, str]]:
+    options = []
+    for monitor in monitors:
+        class_name = str(monitor.config.get("class_name", "person"))
+        label = class_name.title()
+        options.append({"monitor_id": monitor.id, "metric": f"{class_name}.count", "label": f"{monitor.name}: {label} Count"})
+        options.append({"monitor_id": monitor.id, "metric": f"{class_name}.present", "label": f"{monitor.name}: {label} Present"})
+    return options
+
+
+def rule_form_values(rule: RuleConfig | None) -> dict[str, object]:
+    true_relay = first_relay_action(rule.true_actions if rule else [])
+    false_relay = first_relay_action(rule.false_actions if rule else [])
+    webhook = first_webhook_action(rule.true_actions if rule else [])
+    condition = rule.condition if rule else RuleCondition("person.count", ">=", 2)
+    return {
+        "name": rule.name if rule else "",
+        "enabled": rule.enabled if rule else True,
+        "priority": rule.priority if rule else 100,
+        "monitor_id": rule.monitor_id if rule else "",
+        "metric": condition.metric,
+        "operator": condition.operator,
+        "value": condition.value,
+        "true_relay_id": true_relay.relay_channel_id if true_relay else "",
+        "true_relay_state": true_relay.desired_state.value if true_relay else RelayDesiredState.ON.value,
+        "false_relay_id": false_relay.relay_channel_id if false_relay else "",
+        "false_relay_state": false_relay.desired_state.value if false_relay else RelayDesiredState.OFF.value,
+        "webhook_url": webhook.url if webhook else "",
+        "webhook_snapshot_delivery": webhook.snapshot_delivery.value if webhook else SnapshotDelivery.MULTIPART.value,
+        "debounce_true_ms": rule.debounce_true_ms if rule else 500,
+        "debounce_false_ms": rule.debounce_false_ms if rule else 500,
+        "cooldown_ms": rule.cooldown_ms if rule else 1000,
+        "fail_policy": rule.fail_policy.value if rule else FailPolicy.GLOBAL.value,
+    }
+
+
+def first_relay_action(actions: list[object]) -> RelayAction | None:
+    return next((action for action in actions if isinstance(action, RelayAction)), None)
+
+
+def first_webhook_action(actions: list[object]) -> WebhookAction | None:
+    return next((action for action in actions if isinstance(action, WebhookAction)), None)
+
+
+def build_rule_from_form(
+    *,
+    id: str,
+    name: str,
+    enabled: bool,
+    priority: int,
+    monitor_id: str,
+    metric: str,
+    operator: str,
+    value: str,
+    true_relay_id: str,
+    true_relay_state: RelayDesiredState,
+    false_relay_id: str,
+    false_relay_state: RelayDesiredState,
+    webhook_url: str,
+    webhook_snapshot_delivery: SnapshotDelivery,
+    debounce_true_ms: int,
+    debounce_false_ms: int,
+    cooldown_ms: int,
+    fail_policy: FailPolicy,
+) -> RuleConfig:
     if repo.get_monitor(monitor_id) is None:
         raise HTTPException(status_code=400, detail="unknown monitor")
 
@@ -385,16 +506,112 @@ def create_rule(
     elif fail_policy == FailPolicy.FAIL_ON and true_relay_id:
         fault_actions.append(RelayAction(true_relay_id, RelayDesiredState.ON))
 
-    rule = RuleConfig(
-        id=new_id("rule"),
+    return RuleConfig(
+        id=id,
         name=name,
-        enabled=True,
-        priority=100,
+        enabled=enabled,
+        priority=priority,
         monitor_id=monitor_id,
-        condition_group=ConditionGroup(mode="all", conditions=[RuleCondition(metric=metric, operator=operator, value=parse_condition_value(value))]),
+        condition_group=ConditionGroup(
+            mode="all",
+            conditions=[RuleCondition(metric=metric, operator=operator, value=parse_condition_value(value))],
+        ),
         true_actions=true_actions,
         false_actions=false_actions,
         fault_actions=fault_actions,
+        debounce_true_ms=debounce_true_ms,
+        debounce_false_ms=debounce_false_ms,
+        cooldown_ms=cooldown_ms,
+        fail_policy=fail_policy,
+    )
+
+
+@app.post("/ui/rules", response_class=HTMLResponse)
+def create_rule(
+    request: Request,
+    name: str = Form(...),
+    enabled: str | None = Form(None),
+    priority: int = Form(100),
+    monitor_id: str = Form(...),
+    metric: str = Form("person.count"),
+    operator: str = Form(">="),
+    value: str = Form("2"),
+    true_relay_id: str = Form(""),
+    true_relay_state: RelayDesiredState = Form(RelayDesiredState.ON),
+    false_relay_id: str = Form(""),
+    false_relay_state: RelayDesiredState = Form(RelayDesiredState.OFF),
+    webhook_url: str = Form(""),
+    webhook_snapshot_delivery: SnapshotDelivery = Form(SnapshotDelivery.MULTIPART),
+    debounce_true_ms: int = Form(500),
+    debounce_false_ms: int = Form(500),
+    cooldown_ms: int = Form(1000),
+    fail_policy: FailPolicy = Form(FailPolicy.GLOBAL),
+) -> Response:
+    rule = build_rule_from_form(
+        id=new_id("rule"),
+        name=name,
+        enabled=enabled == "on",
+        priority=priority,
+        monitor_id=monitor_id,
+        metric=metric,
+        operator=operator,
+        value=value,
+        true_relay_id=true_relay_id,
+        true_relay_state=true_relay_state,
+        false_relay_id=false_relay_id,
+        false_relay_state=false_relay_state,
+        webhook_url=webhook_url,
+        webhook_snapshot_delivery=webhook_snapshot_delivery,
+        debounce_true_ms=debounce_true_ms,
+        debounce_false_ms=debounce_false_ms,
+        cooldown_ms=cooldown_ms,
+        fail_policy=fail_policy,
+    )
+    repo.save_rule(rule)
+    if wants_fragment(request):
+        return rules_table(request)
+    return RedirectResponse("/rules", status_code=303)
+
+
+@app.post("/ui/rules/{rule_id}", response_class=HTMLResponse)
+def update_rule(
+    request: Request,
+    rule_id: str,
+    name: str = Form(...),
+    enabled: str | None = Form(None),
+    priority: int = Form(100),
+    monitor_id: str = Form(...),
+    metric: str = Form("person.count"),
+    operator: str = Form(">="),
+    value: str = Form("2"),
+    true_relay_id: str = Form(""),
+    true_relay_state: RelayDesiredState = Form(RelayDesiredState.ON),
+    false_relay_id: str = Form(""),
+    false_relay_state: RelayDesiredState = Form(RelayDesiredState.OFF),
+    webhook_url: str = Form(""),
+    webhook_snapshot_delivery: SnapshotDelivery = Form(SnapshotDelivery.MULTIPART),
+    debounce_true_ms: int = Form(500),
+    debounce_false_ms: int = Form(500),
+    cooldown_ms: int = Form(1000),
+    fail_policy: FailPolicy = Form(FailPolicy.GLOBAL),
+) -> Response:
+    if repo.get_rule(rule_id) is None:
+        raise HTTPException(status_code=404)
+    rule = build_rule_from_form(
+        id=rule_id,
+        name=name,
+        enabled=enabled == "on",
+        priority=priority,
+        monitor_id=monitor_id,
+        metric=metric,
+        operator=operator,
+        value=value,
+        true_relay_id=true_relay_id,
+        true_relay_state=true_relay_state,
+        false_relay_id=false_relay_id,
+        false_relay_state=false_relay_state,
+        webhook_url=webhook_url,
+        webhook_snapshot_delivery=webhook_snapshot_delivery,
         debounce_true_ms=debounce_true_ms,
         debounce_false_ms=debounce_false_ms,
         cooldown_ms=cooldown_ms,
@@ -470,7 +687,26 @@ def event_snapshot(event_id: str) -> FileResponse:
     path = Path(event["snapshot_path"])
     if not path.exists():
         raise HTTPException(status_code=404)
-    return FileResponse(path, media_type="image/jpeg", filename=path.name)
+    return FileResponse(path, media_type="image/jpeg", headers={"Content-Disposition": "inline"})
+
+
+@app.get("/events/{event_id}/snapshot", response_class=HTMLResponse)
+def event_snapshot_page(request: Request, event_id: str) -> HTMLResponse:
+    event = repo.get_event(event_id)
+    if event is None or not event["snapshot_path"]:
+        raise HTTPException(status_code=404)
+    path = Path(event["snapshot_path"])
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "pages/snapshot.html",
+        {
+            "title": "Event Snapshot",
+            "subtitle": f"{event['created_at']} - {event['metric']}={event['value']}",
+            "image_url": f"/api/events/{event_id}/snapshot",
+        },
+    )
 
 
 @app.get("/storage", response_class=HTMLResponse)
@@ -570,6 +806,17 @@ def parse_condition_value(raw: str) -> int | float | bool | str:
         return float(normalized)
     except ValueError:
         return normalized
+
+
+def normalized_zone(x: float, y: float, width: float, height: float) -> dict[str, float]:
+    left = min(max(x, 0.0), 1.0)
+    top = min(max(y, 0.0), 1.0)
+    return {
+        "x": left,
+        "y": top,
+        "width": min(max(width, 0.0), 1.0 - left),
+        "height": min(max(height, 0.0), 1.0 - top),
+    }
 
 
 def sse_message(event_name: str, payload: dict[str, object]) -> str:

@@ -27,7 +27,7 @@
         <td>{{ event.rule_id }}</td>
         <td>{{ event.metric }}</td>
         <td>{{ event.value }}</td>
-        <td>{% if event.snapshot_path %}<a href="/api/events/{{ event.id }}/snapshot">View</a>{% else %}-{% endif %}</td>
+        <td>{% if event.snapshot_path %}<a href="/events/{{ event.id }}/snapshot">View</a>{% else %}-{% endif %}</td>
       </tr>
       {% else %}
       <tr><td colspan="5">No events yet.</td></tr>

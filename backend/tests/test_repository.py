@@ -7,7 +7,7 @@ from backend.app.domain import CameraConfig, ConditionGroup, MonitorConfig, Obse
 def test_repository_persists_camera_and_rule_with_actions(tmp_path) -> None:
     repo = Repository(Database(tmp_path / "smartai.db"))
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live", "admin", "secret")
-    monitor = MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1")
+    monitor = MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1")
     rule = RuleConfig(
         id="rule-1",
         name="Mantrap",
@@ -36,31 +36,31 @@ def test_repository_updates_monitor_in_place(tmp_path) -> None:
     repo = Repository(Database(tmp_path / "smartai.db"))
     repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
     repo.save_camera(CameraConfig("cam-2", "Exit", "192.168.1.51", 554, "/live"))
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
 
     repo.save_monitor(
         MonitorConfig(
             "mon-1",
-            "Exit weapons",
-            "weapon_visibility",
+            "Exit cars",
+            "object_detector",
             "cam-2",
-            config={"class_name": "weapon", "confidence_threshold": 0.7},
+            config={"class_name": "car", "confidence_threshold": 0.7},
         )
     )
 
     assert repo.get_monitor("mon-1") == MonitorConfig(
         "mon-1",
-        "Exit weapons",
-        "weapon_visibility",
+        "Exit cars",
+        "object_detector",
         "cam-2",
-        config={"class_name": "weapon", "confidence_threshold": 0.7},
+        config={"class_name": "car", "confidence_threshold": 0.7},
     )
 
 
 def test_live_signatures_change_when_monitor_output_changes(tmp_path) -> None:
     repo = Repository(Database(tmp_path / "smartai.db"))
     repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
     before = repo.live_signatures()
 
     repo.record_observation(
@@ -71,7 +71,7 @@ def test_live_signatures_change_when_monitor_output_changes(tmp_path) -> None:
             2,
             timestamp=datetime(2026, 5, 15, tzinfo=timezone.utc),
             monitor_id="mon-1",
-            model_id="person_counter",
+            model_id="object_detector",
         )
     )
     after = repo.live_signatures()
@@ -113,7 +113,7 @@ def test_camera_health_only_updates_when_state_changes(tmp_path) -> None:
 def test_monitor_runtime_is_created_and_updated(tmp_path) -> None:
     repo = Repository(Database(tmp_path / "smartai.db"))
     repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
-    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "person_counter", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
 
     rows = repo.list_monitor_runtime_rows()
     assert rows[0]["status"] == "configured"

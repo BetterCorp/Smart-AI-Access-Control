@@ -6,11 +6,15 @@
       {% for rule in rules %}
       <tr>
         <td>{{ rule.name }}</td>
-        <td>{{ rule.monitor_id }}</td>
+        {% set monitor = monitors_by_id.get(rule.monitor_id) if monitors_by_id else none %}
+        <td>{{ monitor.name if monitor else rule.monitor_id }}</td>
         <td>{{ rule.condition.metric }} {{ rule.condition.operator }} {{ rule.condition.value }}</td>
         <td>{{ rule.true_actions|length }} true / {{ rule.false_actions|length }} false / {{ rule.fault_actions|length }} fault</td>
         <td>{{ rule.priority }}</td>
-        <td><button hx-post="/ui/rules/{{ rule.id }}/delete" hx-target="#rules-table" hx-swap="outerHTML">Delete</button></td>
+        <td>
+          <button hx-get="/ui/rules/{{ rule.id }}/edit" hx-target="#rule-edit-slot" hx-swap="innerHTML">Edit</button>
+          <button hx-post="/ui/rules/{{ rule.id }}/delete" hx-target="#rules-table" hx-swap="outerHTML">Delete</button>
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="6">No rules configured.</td></tr>

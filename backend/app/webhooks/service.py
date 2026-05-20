@@ -83,6 +83,7 @@ class WebhookBuilder:
                 "value": observation.value,
                 "zoneId": observation.zone_id,
                 "labels": observation.labels,
+                "metadata": observation.metadata,
             },
             "snapshot": snapshot_payload,
         }
@@ -108,4 +109,3 @@ class WebhookBuilder:
             f"--{boundary}--\r\n".encode(),
         ]
         return f"multipart/form-data; boundary={boundary}", b"".join(lines)
-

@@ -11,7 +11,7 @@
         <td>{{ event.metric }}</td>
         <td>{{ event.value }}</td>
         <td>{{ event.webhook_status }}</td>
-        <td>{% if event.snapshot_path %}<a href="/api/events/{{ event.id }}/snapshot">View</a>{% else %}-{% endif %}</td>
+        <td>{% if event.snapshot_path %}<a href="/events/{{ event.id }}/snapshot">View</a>{% else %}-{% endif %}</td>
       </tr>
       {% else %}
       <tr><td colspan="8">No events yet.</td></tr>

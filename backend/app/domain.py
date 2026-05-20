@@ -102,6 +102,7 @@ class Observation:
     model_id: str | None = None
     zone_id: str | None = None
     labels: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

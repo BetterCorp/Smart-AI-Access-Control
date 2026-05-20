@@ -7,7 +7,7 @@
       <tr>
         <td>{{ snapshot.monitor_name }}</td>
         <td>{{ snapshot.observed_at }}</td>
-        <td><a href="/api/monitors/{{ snapshot.monitor_id }}/debug-snapshot">View</a></td>
+        <td><a href="/monitors/{{ snapshot.monitor_id }}/debug-snapshot">View</a></td>
       </tr>
       {% else %}
       <tr><td colspan="3">No debug snapshots available from the active inference provider.</td></tr>

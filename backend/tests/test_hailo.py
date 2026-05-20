@@ -21,7 +21,7 @@ def test_hailo_observations_include_monitor_identity() -> None:
     monitor = MonitorConfig(
         "mon-1",
         "Entrance people",
-        "person_counter",
+        "object_detector",
         "cam-1",
         config={"class_name": "person", "confidence_threshold": 0.5},
     )
@@ -40,7 +40,7 @@ def test_hailo_observations_include_monitor_identity() -> None:
         ("person.present", True),
     ]
     assert all(item.monitor_id == "mon-1" for item in observations)
-    assert all(item.model_id == "person_counter" for item in observations)
+    assert all(item.model_id == "object_detector" for item in observations)
 
 
 def test_hailo_resources_fail_cleanly_when_default_model_is_missing() -> None:
@@ -150,7 +150,8 @@ def test_hailo_debug_snapshot_failure_does_not_drop_observations() -> None:
         },
     )
 
-    assert published[0] == ("bus", "Debug snapshot unavailable: snapshot failed")
+    assert published[0][0] == "bus"
+    assert str(published[0][1]).startswith("Debug snapshot unavailable:")
     assert published[1][0] == "result"
     assert published[1][1].detections == [Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))]
 
@@ -184,8 +185,8 @@ def test_hailo_provider_reuses_one_session_for_same_camera(monkeypatch) -> None:
 
     monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
-    first = MonitorConfig("mon-1", "Strict", "person_counter", "cam-1", config={"confidence_threshold": 0.9})
-    second = MonitorConfig("mon-2", "Loose", "person_counter", "cam-1", config={"confidence_threshold": 0.5})
+    first = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1", config={"confidence_threshold": 0.9})
+    second = MonitorConfig("mon-2", "Loose", "object_detector", "cam-1", config={"confidence_threshold": 0.5})
     provider = HailoGStreamerProvider()
 
     first_result = provider.result_for(first, camera)

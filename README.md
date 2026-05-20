@@ -7,8 +7,8 @@ This first implementation is a working scaffold:
 - FastAPI + server-rendered HTML/HTMX web shell.
 - SQLite persistence for admin sessions, cameras, AI monitors, relays, rules, events, and settings.
 - Dependency-light core domain services for rules, relays, storage, webhooks, and RTSP URL building.
-- Plugin-ready AI monitor shape with initial person counting and weapon visibility monitor definitions.
-- Worker loop with mockable inference, a Raspberry Pi Hailo person-counting path, snapshot event creation, relay arbitration, and webhook dispatch.
+- Plugin-ready AI monitor shape with templates over the built-in object detector classes.
+- Worker loop with mockable inference, a Raspberry Pi Hailo object-detection path, snapshot event creation, relay arbitration, and webhook dispatch.
 - Raspberry Pi deployment notes and verification scripts.
 - Focused tests for the safety-critical logic.
 
@@ -18,16 +18,17 @@ The system separates camera input, AI interpretation, rules, and outputs:
 
 - Cameras define RTSP connection details.
 - AI Monitors run a model or analytic against one camera and publish typed metrics.
+- AI Monitors can optionally apply a visual zone after detection so rules only see objects inside the configured boundary.
 - Rules evaluate conditions against one monitor's metrics.
 - Outputs perform relay changes, webhooks, snapshots, debounce, cooldown, and fail behavior.
 
 Examples:
 
-- `Person Counter` uses a `YOLOv8 object detector` and publishes `person.count` as a number and `person.present` as a boolean.
-- `Weapon Visibility` uses a `custom YOLO-family object detector` and publishes `weapon.visible` as a boolean and `weapon.count` as a number.
-- The AI model list also shows which analytics each monitor type is intended for, such as occupancy counting or weapon presence alerting.
+- `Object Detector` uses the built-in `YOLOv8s object detector` and publishes `<class>.count` as a number and `<class>.present` as a boolean.
+- Monitor templates expose the detector classes already available from that model, such as `person`, `car`, or `dog`.
 - A mantrap rule can evaluate `person.count >= 2`.
-- A weapon rule can evaluate `weapon.visible is true`.
+- A presence rule can evaluate `person.present is true`.
+- Webhooks include observation metadata with the selected class, confidence threshold, active zone geometry, and matched detection boxes/confidences.
 
 ## Local Development
 
@@ -59,7 +60,9 @@ Use mock inference during development. On the Pi, the relay hardware is only dri
 
 When mock inference is enabled, AI monitor values are simulated and do not come from live camera frames. The Monitors page states the active inference mode and exposes live metric updates plus debug-snapshot slots for real providers.
 
-In real inference mode, `Person Counter` uses the official Hailo detection resources and writes live debug snapshots from the analyzed frame. `Weapon Visibility` still requires a dedicated custom detector before it can run against real camera frames.
+In real inference mode, detector-backed monitors use the official Hailo detection resources and write live debug snapshots from the analyzed frame.
+
+Zone editing is available from a monitor's edit form after that monitor has produced a debug snapshot. Zones are evaluated after full-frame detection so multiple zone monitors can reuse one detector pipeline for the same camera.
 
 ## Raspberry Pi Target
 
@@ -93,7 +96,7 @@ Deployment is split into two scripts:
 - optionally configure UFW,
 - restart services,
 - verify `http://127.0.0.1:8000/healthz`.
-- install the official `hailo-apps` Python package used by the real person-counting provider when Hailo support is enabled.
+- install the official `hailo-apps` Python package used by the real object-detection provider when Hailo support is enabled.
 - build the app virtualenv with access to system Python packages so apt-installed `gi`/Hailo bindings remain visible.
 - run Hailo post-install for the `detection` group so the default HEF, post-process libraries, and environment file exist before the worker starts.
 - reuse already-downloaded Hailo detection resources on later syncs and only rebuild the post-process side when the files are already present.

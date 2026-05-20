@@ -23,7 +23,13 @@ def test_webhook_base64_json_includes_snapshot_bytes() -> None:
         event_id="evt-1",
         camera={"id": "cam-1", "name": "Entrance"},
         rule={"id": "rule-1", "name": "Mantrap", "state": "true"},
-        observation=Observation("core.object_count", "cam-1", "person.count", 2),
+        observation=Observation(
+            "core.object_count",
+            "cam-1",
+            "person.count",
+            2,
+            metadata={"detections": [{"className": "person"}]},
+        ),
         snapshot=snapshot_ref(),
         snapshot_bytes=b"jpg",
     )
@@ -33,6 +39,7 @@ def test_webhook_base64_json_includes_snapshot_bytes() -> None:
     assert prepared.headers["Content-Type"] == "application/json"
     assert payload["snapshotBase64"] == base64.b64encode(b"jpg").decode("ascii")
     assert payload["snapshot"]["filename"] == "evt-1.jpg"
+    assert payload["observation"]["metadata"]["detections"] == [{"className": "person"}]
 
 
 def test_webhook_multipart_includes_json_and_file() -> None:
@@ -66,4 +73,3 @@ def test_webhook_signature_covers_body() -> None:
     )
 
     assert prepared.headers["X-SmartAI-Signature"].startswith("sha256=")
-
