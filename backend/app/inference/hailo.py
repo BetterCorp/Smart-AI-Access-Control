@@ -35,6 +35,7 @@ class HailoGStreamerProvider:
     def __init__(self) -> None:
         self._sessions: dict[tuple[object, ...], HailoCameraSession] = {}
         self._lock = threading.Lock()
+        self._telemetry_enabled = False
 
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         if monitor.model_id not in {"object_detector", "person_counter"}:
@@ -46,14 +47,14 @@ class HailoGStreamerProvider:
         with self._lock:
             session = self._sessions.get(fingerprint)
             if session is None:
-                session = HailoCameraSession(camera, fingerprint)
+                session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
                 self._sessions[fingerprint] = session
                 session.start()
             elif session.has_exited():
                 if not session.restart_ready():
                     raise RuntimeError(session.exit_error())
                 session.stop()
-                session = HailoCameraSession(camera, fingerprint)
+                session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
                 self._sessions[fingerprint] = session
                 session.start()
 
@@ -94,6 +95,16 @@ class HailoGStreamerProvider:
         for session in sessions:
             session.stop()
 
+    def set_telemetry_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            if enabled == self._telemetry_enabled:
+                return
+            self._telemetry_enabled = enabled
+            sessions = list(self._sessions.values())
+            self._sessions.clear()
+        for session in sessions:
+            session.stop()
+
 
 class HailoCameraSession:
     restart_backoff_seconds = 5.0
@@ -102,9 +113,12 @@ class HailoCameraSession:
         self,
         camera: CameraConfig,
         fingerprint: tuple[object, ...],
+        *,
+        telemetry_enabled: bool = False,
     ) -> None:
         self.camera = camera
         self.fingerprint = fingerprint
+        self.telemetry_enabled = telemetry_enabled
         self._latest_frame: HailoDetectionFrame | None = None
         self._latest_error: str | None = None
         self._latest_bus_message: str | None = None
@@ -117,7 +131,7 @@ class HailoCameraSession:
     def start(self) -> None:
         self._process = mp.get_context("spawn").Process(
             target=run_hailo_child,
-            args=(self.camera, self._queue),
+            args=(self.camera, self._queue, self.telemetry_enabled),
             name=f"hailo-camera-{self.camera.id}",
             daemon=True,
         )
@@ -321,7 +335,9 @@ class HailoPipelineRunner:
             self.output_queue.put_nowait((kind, payload))
 
 
-def run_hailo_child(camera: CameraConfig, output_queue: Any) -> None:
+def run_hailo_child(camera: CameraConfig, output_queue: Any, telemetry_enabled: bool = False) -> None:
+    os.environ["HAILO_MONITOR"] = "1" if telemetry_enabled else "0"
+    os.environ.setdefault("HAILO_MONITOR_TIME_INTERVAL", "5000")
     HailoPipelineRunner(camera, output_queue).run()
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -31,6 +32,7 @@ from backend.app.plugins.object_count import ObjectCountConfig, ObjectCountPlugi
 from backend.app.relay.service import RelayArbiter, RelayCommand, RelayConflictError, UsbRelayDriver
 from backend.app.rules.engine import RuleEngine
 from backend.app.storage.snapshots import SnapshotStore, StorageConfig, event_id, snapshot_dedupe_key
+from backend.app.system_metrics import hailo_telemetry_is_active
 from backend.app.webhooks.service import PreparedWebhook, WebhookBuilder
 
 
@@ -104,6 +106,7 @@ class Worker:
         self.inference_mode = inference_mode
         self.relay_hardware_enabled = relay_driver is not None if relay_hardware_enabled is None else relay_hardware_enabled
         self.relay_probe = relay_driver or UsbRelayDriver()
+        self._hailo_telemetry_enabled: bool | None = None
 
     def run_forever(self, interval_seconds: float = 1.0) -> None:
         while True:
@@ -119,6 +122,7 @@ class Worker:
         cameras = self.repo.list_cameras()
         camera_by_id = {camera.id: camera for camera in cameras}
         monitors = self.repo.list_monitors()
+        self._sync_hailo_telemetry_state()
         prune_sessions = getattr(self.inference, "prune_sessions", None)
         if callable(prune_sessions):
             prune_sessions(monitors, camera_by_id)
@@ -176,6 +180,17 @@ class Worker:
 
         self._apply_relays(relay_commands)
         self.snapshot_store.prune()
+
+    def _sync_hailo_telemetry_state(self) -> None:
+        set_telemetry_enabled = getattr(self.inference, "set_telemetry_enabled", None)
+        if not callable(set_telemetry_enabled):
+            return
+        monitor_support_enabled = os.environ.get("SMARTAI_ENABLE_HAILO_MONITOR", "1") == "1"
+        telemetry_enabled = monitor_support_enabled and hailo_telemetry_is_active(load_settings().data_dir)
+        if telemetry_enabled == self._hailo_telemetry_enabled:
+            return
+        set_telemetry_enabled(telemetry_enabled)
+        self._hailo_telemetry_enabled = telemetry_enabled
 
     def _persist_event_if_changed(
         self,

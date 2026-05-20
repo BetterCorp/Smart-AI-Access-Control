@@ -13,18 +13,20 @@ from typing import Any
 
 HAILO_MONITOR_POLL_SECONDS = 5.0
 HAILO_TELEMETRY_IDLE_SECONDS = 30 * 60.0
+HAILO_TELEMETRY_FILE = "hailo-telemetry.active"
 
 _HAILO_CACHE: tuple[float, dict[str, Any]] | None = None
-_HAILO_TELEMETRY_ACTIVE_UNTIL: float = 0.0
 
 
 def performance_snapshot(storage_path: Path, *, activate_hailo_telemetry: bool = False) -> dict[str, Any]:
+    if activate_hailo_telemetry:
+        mark_hailo_telemetry_active(storage_path)
     return {
         "cpu": cpu_metrics(),
         "memory": memory_metrics(),
         "storage": storage_metrics(storage_path),
         "temperature": temperature_metrics(),
-        "hailo": hailo_metrics(activate=activate_hailo_telemetry),
+        "hailo": hailo_metrics(storage_path),
     }
 
 
@@ -83,18 +85,35 @@ def temperature_metrics() -> dict[str, Any]:
     return {"available": True, "celsius": round(celsius, 1)}
 
 
-def hailo_metrics(ttl_seconds: float = HAILO_MONITOR_POLL_SECONDS, *, activate: bool = False) -> dict[str, Any]:
-    global _HAILO_CACHE, _HAILO_TELEMETRY_ACTIVE_UNTIL
+def mark_hailo_telemetry_active(storage_path: Path, idle_seconds: float = HAILO_TELEMETRY_IDLE_SECONDS) -> None:
+    try:
+        storage_path.mkdir(parents=True, exist_ok=True)
+        telemetry_state_path(storage_path).write_text(str(time.time() + idle_seconds), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def hailo_telemetry_is_active(storage_path: Path) -> bool:
+    try:
+        active_until = float(telemetry_state_path(storage_path).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    return time.time() < active_until
+
+
+def telemetry_state_path(storage_path: Path) -> Path:
+    return storage_path / HAILO_TELEMETRY_FILE
+
+
+def hailo_metrics(storage_path: Path, ttl_seconds: float = HAILO_MONITOR_POLL_SECONDS) -> dict[str, Any]:
+    global _HAILO_CACHE
     now = time.monotonic()
-    if activate:
-        _HAILO_TELEMETRY_ACTIVE_UNTIL = now + HAILO_TELEMETRY_IDLE_SECONDS
+    telemetry_active = hailo_telemetry_is_active(storage_path)
 
     if _HAILO_CACHE is not None and now - _HAILO_CACHE[0] < ttl_seconds:
         metrics = dict(_HAILO_CACHE[1])
-        metrics["telemetryActive"] = now < _HAILO_TELEMETRY_ACTIVE_UNTIL
+        metrics["telemetryActive"] = telemetry_active
         return metrics
-
-    telemetry_active = now < _HAILO_TELEMETRY_ACTIVE_UNTIL
 
     device_nodes = sorted(glob.glob("/dev/hailo*"))
     pci = run_command(["lspci", "-nn"], timeout_seconds=2.0)
@@ -126,6 +145,7 @@ def hailo_metrics(ttl_seconds: float = HAILO_MONITOR_POLL_SECONDS, *, activate: 
         "monitorOk": monitor_stats["hasData"],
         "monitorStatus": monitor_status(monitor, monitor_output, telemetry_active=telemetry_active),
         "monitorRaw": truncate_text(monitor_output, 2500),
+        "monitorNoFiles": monitor_stats["noFiles"],
         "utilizationPercent": monitor_stats["utilizationPercent"],
         "fps": monitor_stats["fps"],
         "activeNetworkGroups": monitor_stats["activeNetworkGroups"],
@@ -171,12 +191,15 @@ def parse_hailo_architecture(output: str) -> str | None:
 
 
 def parse_hailo_monitor(output: str) -> dict[str, Any]:
-    if not output.strip():
+    normalized = output.lower()
+    no_files = "did not retrieve any files" in normalized or "no application currently running" in normalized
+    if not output.strip() or no_files:
         return {
             "hasData": False,
             "utilizationPercent": None,
             "fps": None,
             "activeNetworkGroups": 0,
+            "noFiles": no_files,
         }
 
     percent_values = [float(match) for match in re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%", output)]
@@ -197,6 +220,7 @@ def parse_hailo_monitor(output: str) -> dict[str, Any]:
         "utilizationPercent": round(max(percent_values), 1) if percent_values else None,
         "fps": round(max(fps_values), 2) if fps_values else None,
         "activeNetworkGroups": len(network_groups),
+        "noFiles": False,
     }
 
 
@@ -205,6 +229,8 @@ def monitor_status(result: CommandResult, output: str, *, telemetry_active: bool
         return "telemetry idle"
     if result.returncode == 127:
         return "hailortcli not found"
+    if "did not retrieve any files" in output.lower() or "no application currently running" in output.lower():
+        return "no active Hailo telemetry files"
     if output.strip():
         return "sampled"
     if result.returncode == 124:

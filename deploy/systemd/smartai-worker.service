@@ -13,7 +13,8 @@ Environment=SMARTAI_DB=/var/lib/smartai/smartai.db
 Environment=SMARTAI_SNAPSHOT_ROOT=/var/lib/smartai/snapshots
 Environment=SMARTAI_MOCK_INFERENCE=1
 Environment=SMARTAI_ENABLE_RELAY_HARDWARE=0
-Environment=HAILO_MONITOR=1
+Environment=SMARTAI_ENABLE_HAILO_MONITOR=1
+Environment=HAILO_MONITOR=0
 Environment=HAILO_MONITOR_TIME_INTERVAL=5000
 ExecStart=/opt/smart-ai-access-control/.venv/bin/python -m backend.app.worker
 Restart=on-failure

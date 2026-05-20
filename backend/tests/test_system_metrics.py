@@ -2,6 +2,7 @@ from backend.app.system_metrics import (
     CommandResult,
     hailo_metrics,
     human_bytes,
+    mark_hailo_telemetry_active,
     memory_metrics,
     parse_hailo_architecture,
     parse_hailo_monitor,
@@ -40,9 +41,20 @@ def test_parse_hailo_monitor_extracts_usage_and_fps() -> None:
     assert metrics["utilizationPercent"] == 42.5
     assert metrics["fps"] == 18.75
     assert metrics["activeNetworkGroups"] == 1
+    assert metrics["noFiles"] is False
 
 
-def test_hailo_monitor_probe_is_skipped_when_telemetry_is_idle(monkeypatch) -> None:
+def test_parse_hailo_monitor_detects_no_files_message() -> None:
+    metrics = parse_hailo_monitor(
+        "Monitor did not retrieve any files. This occurs when there is no application currently running.\n"
+        "Device ID Utilization (%) Architecture\n"
+    )
+
+    assert metrics["hasData"] is False
+    assert metrics["noFiles"] is True
+
+
+def test_hailo_monitor_probe_is_skipped_when_telemetry_is_idle(monkeypatch, tmp_path) -> None:
     commands: list[list[str]] = []
 
     def fake_run(command: list[str], timeout_seconds: float, env=None) -> CommandResult:
@@ -50,17 +62,16 @@ def test_hailo_monitor_probe_is_skipped_when_telemetry_is_idle(monkeypatch) -> N
         return CommandResult(0, stdout="Device Architecture: HAILO8L\n")
 
     monkeypatch.setattr("backend.app.system_metrics._HAILO_CACHE", None)
-    monkeypatch.setattr("backend.app.system_metrics._HAILO_TELEMETRY_ACTIVE_UNTIL", 0.0)
     monkeypatch.setattr("backend.app.system_metrics.glob.glob", lambda pattern: ["/dev/hailo0"])
     monkeypatch.setattr("backend.app.system_metrics.run_command", fake_run)
 
-    metrics = hailo_metrics(ttl_seconds=0, activate=False)
+    metrics = hailo_metrics(tmp_path, ttl_seconds=0)
 
     assert metrics["telemetryActive"] is False
     assert ["hailortcli", "monitor"] not in commands
 
 
-def test_hailo_monitor_probe_runs_when_telemetry_is_active(monkeypatch) -> None:
+def test_hailo_monitor_probe_runs_when_telemetry_is_active(monkeypatch, tmp_path) -> None:
     commands: list[list[str]] = []
 
     def fake_run(command: list[str], timeout_seconds: float, env=None) -> CommandResult:
@@ -70,11 +81,11 @@ def test_hailo_monitor_probe_runs_when_telemetry_is_active(monkeypatch) -> None:
         return CommandResult(0, stdout="Device Architecture: HAILO8L\n")
 
     monkeypatch.setattr("backend.app.system_metrics._HAILO_CACHE", None)
-    monkeypatch.setattr("backend.app.system_metrics._HAILO_TELEMETRY_ACTIVE_UNTIL", 0.0)
     monkeypatch.setattr("backend.app.system_metrics.glob.glob", lambda pattern: ["/dev/hailo0"])
     monkeypatch.setattr("backend.app.system_metrics.run_command", fake_run)
+    mark_hailo_telemetry_active(tmp_path)
 
-    metrics = hailo_metrics(ttl_seconds=0, activate=True)
+    metrics = hailo_metrics(tmp_path, ttl_seconds=0)
 
     assert metrics["telemetryActive"] is True
     assert ["hailortcli", "monitor"] in commands
