@@ -70,13 +70,34 @@ body {
   gap: 12px;
 }
 
-.stats strong {
+.stats strong,
+.metric-grid strong {
   display: block;
   font-size: 24px;
 }
 
-.stats span {
+.stats span,
+.metric-grid span,
+.metric-grid small {
   color: #536170;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metric-grid article {
+  border: 1px solid #e2e7ec;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.metric-grid small {
+  display: block;
+  margin-top: 4px;
 }
 
 .form-grid {

@@ -1,0 +1,31 @@
+<h3>Machine Performance</h3>
+<section class="metric-grid">
+  <article>
+    <strong>{{ performance.cpu.loadPercent }}%</strong>
+    <span>CPU load</span>
+    <small>{{ performance.cpu.cores }} cores | {{ performance.cpu.load1 }} / {{ performance.cpu.load5 }} / {{ performance.cpu.load15 }}</small>
+  </article>
+  <article>
+    <strong>{{ performance.memory.usedPercent }}%</strong>
+    <span>RAM used</span>
+    <small>{{ performance.memory.usedHuman }} / {{ performance.memory.totalHuman }}</small>
+  </article>
+  <article>
+    <strong>{{ performance.storage.usedPercent }}%</strong>
+    <span>Storage used</span>
+    <small>{{ performance.storage.usedHuman }} / {{ performance.storage.totalHuman }}</small>
+  </article>
+  <article>
+    <strong>{% if performance.temperature.available %}{{ performance.temperature.celsius }} C{% else %}n/a{% endif %}</strong>
+    <span>CPU temperature</span>
+    <small>thermal_zone0</small>
+  </article>
+</section>
+<h4>AI Accelerator</h4>
+<dl class="health-grid">
+  <dt>PCIe detected</dt><dd>{{ performance.hailo.pciDetected }}</dd>
+  <dt>Driver ready</dt><dd>{{ performance.hailo.driverReady }}</dd>
+  <dt>Device nodes</dt><dd>{{ performance.hailo.deviceNodes|join(", ") if performance.hailo.deviceNodes else "none" }}</dd>
+  <dt>Identify OK</dt><dd>{{ performance.hailo.identifyOk }}</dd>
+  <dt>Architecture</dt><dd>{{ performance.hailo.architecture or "unknown" }}</dd>
+</dl>

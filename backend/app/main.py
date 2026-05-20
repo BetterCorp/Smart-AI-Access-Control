@@ -31,6 +31,7 @@ from backend.app.domain import (
 )
 from backend.app.models import MODEL_DEFINITIONS, model_options, monitor_templates
 from backend.app.plugins.object_count import ObjectCountPlugin
+from backend.app.system_metrics import performance_snapshot
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -821,6 +822,11 @@ def health() -> dict[str, object]:
     }
 
 
+@app.get("/api/system/performance")
+def performance() -> dict[str, object]:
+    return performance_snapshot(settings.data_dir)
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, object]:
     return {"ok": True}
@@ -829,6 +835,11 @@ def healthz() -> dict[str, object]:
 @app.get("/ui/system/health", response_class=HTMLResponse)
 def health_panel(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "partials/health.html", {"health": health()})
+
+
+@app.get("/ui/system/performance", response_class=HTMLResponse)
+def performance_panel(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "partials/performance.html", {"performance": performance()})
 
 
 @app.get("/api/live/stream")
