@@ -23,8 +23,8 @@
     <tbody>
       {% for event in events %}
       <tr>
-        <td>{{ event.created_at }}</td>
-        <td>{{ event.rule_id }}</td>
+        <td>{{ event.created_at_display }}</td>
+        <td>{{ event.rule_name }}</td>
         <td>{{ event.metric }}</td>
         <td>{{ event.value }}</td>
         <td>{% if event.snapshot_path %}<a href="/events/{{ event.id }}/snapshot">View</a>{% else %}-{% endif %}</td>

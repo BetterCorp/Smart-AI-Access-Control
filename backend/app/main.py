@@ -4,7 +4,9 @@ import os
 import asyncio
 import json
 import uuid
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -35,6 +37,7 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 settings = load_settings()
 repo = Repository(Database(settings.db_path))
+LOCAL_TIMEZONE = ZoneInfo(os.environ.get("SMARTAI_TIMEZONE", "Africa/Johannesburg"))
 
 app = FastAPI(title="Smart AI Access Control")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -112,7 +115,9 @@ def dashboard(request: Request) -> HTMLResponse:
     cameras = repo.list_cameras()
     rules = repo.list_rules()
     relays = repo.list_relays()
-    events = repo.list_events(limit=10)
+    cameras_by_id = {camera.id: camera for camera in cameras}
+    rules_by_id = {rule.id: rule for rule in rules}
+    events = event_view_rows(repo.list_events(limit=10), cameras_by_id, rules_by_id)
     return templates.TemplateResponse(
         request,
         "pages/dashboard.html",
@@ -464,6 +469,11 @@ def monitor_metric_options(monitors: list[MonitorConfig]) -> list[dict[str, str]
     return options
 
 
+def valid_monitor_metrics(monitor: MonitorConfig) -> set[str]:
+    class_name = str(monitor.config.get("class_name", "person"))
+    return {f"{class_name}.count", f"{class_name}.present"}
+
+
 def rule_form_values(rule: RuleConfig | None) -> dict[str, object]:
     true_relay = first_relay_action(rule.true_actions if rule else [])
     false_relay = first_relay_action(rule.false_actions if rule else [])
@@ -519,8 +529,11 @@ def build_rule_from_form(
     cooldown_ms: int,
     fail_policy: FailPolicy,
 ) -> RuleConfig:
-    if repo.get_monitor(monitor_id) is None:
+    monitor = repo.get_monitor(monitor_id)
+    if monitor is None:
         raise HTTPException(status_code=400, detail="unknown monitor")
+    if metric not in valid_monitor_metrics(monitor):
+        raise HTTPException(status_code=400, detail="metric does not belong to selected monitor")
 
     true_actions = []
     false_actions = []
@@ -701,12 +714,24 @@ def test_relay(
 
 @app.get("/events", response_class=HTMLResponse)
 def events_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "pages/events.html", {"events": repo.list_events(limit=250)})
+    cameras_by_id = {camera.id: camera for camera in repo.list_cameras()}
+    rules_by_id = {rule.id: rule for rule in repo.list_rules()}
+    return templates.TemplateResponse(
+        request,
+        "pages/events.html",
+        {"events": event_view_rows(repo.list_events(limit=250), cameras_by_id, rules_by_id)},
+    )
 
 
 @app.get("/ui/events/table", response_class=HTMLResponse)
 def events_table(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "partials/events_table.html", {"events": repo.list_events(limit=250)})
+    cameras_by_id = {camera.id: camera for camera in repo.list_cameras()}
+    rules_by_id = {rule.id: rule for rule in repo.list_rules()}
+    return templates.TemplateResponse(
+        request,
+        "partials/events_table.html",
+        {"events": event_view_rows(repo.list_events(limit=250), cameras_by_id, rules_by_id)},
+    )
 
 
 @app.get("/api/events/{event_id}/snapshot")
@@ -847,6 +872,25 @@ def normalized_zone(x: float, y: float, width: float, height: float) -> dict[str
         "width": min(max(width, 0.0), 1.0 - left),
         "height": min(max(height, 0.0), 1.0 - top),
     }
+
+
+def event_view_rows(events, cameras_by_id: dict[str, CameraConfig], rules_by_id: dict[str, RuleConfig]) -> list[dict[str, object]]:
+    rows = []
+    for event in events:
+        row = dict(event)
+        row["camera_name"] = cameras_by_id.get(event["camera_id"], CameraConfig(event["camera_id"], event["camera_id"], "", 0, "")).name
+        row["rule_name"] = rules_by_id.get(event["rule_id"], RuleConfig(event["rule_id"], event["rule_id"], True, 0, "", ConditionGroup("all", []))).name
+        row["created_at_display"] = format_local_timestamp(event["created_at"])
+        rows.append(row)
+    return rows
+
+
+def format_local_timestamp(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return parsed.astimezone(LOCAL_TIMEZONE).strftime("%H:%M:%S %d/%m/%Y")
 
 
 def sse_message(event_name: str, payload: dict[str, object]) -> str:

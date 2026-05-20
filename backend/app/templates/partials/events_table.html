@@ -4,9 +4,9 @@
     <tbody>
       {% for event in events %}
       <tr>
-        <td>{{ event.created_at }}</td>
-        <td>{{ event.camera_id }}</td>
-        <td>{{ event.rule_id }}</td>
+        <td>{{ event.created_at_display }}</td>
+        <td>{{ event.camera_name }}</td>
+        <td>{{ event.rule_name }}</td>
         <td>{{ event.state }}</td>
         <td>{{ event.metric }}</td>
         <td>{{ event.value }}</td>

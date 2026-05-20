@@ -30,13 +30,13 @@
         </select>
       </label>
       <label>Operator
-        <select name="operator">
+        <select name="operator" data-rule-operator-select>
           {% for item in [">=", ">", "==", "!=", "<", "<=", "is_true", "is_false"] %}
           <option value="{{ item }}" {% if item == form.operator %}selected{% endif %}>{{ item.replace("_", " ") }}</option>
           {% endfor %}
         </select>
       </label>
-      <label>Value <input name="value" value="{{ form.value }}"></label>
+      <label>Value <input name="value" value="{{ form.value }}" data-rule-value-input></label>
     </div>
   </section>
 
@@ -44,7 +44,7 @@
     <h4>Outputs</h4>
     <div class="form-grid">
       <label>When True Relay
-        <select name="true_relay_id">
+        <select name="true_relay_id" data-relay-select data-relay-state-name="true_relay_state">
           <option value="">No relay</option>
           {% for relay in relays %}
           <option value="{{ relay.id }}" {% if relay.id == form.true_relay_id %}selected{% endif %}>{{ relay.name }}</option>
@@ -58,7 +58,7 @@
         </select>
       </label>
       <label>When False Relay
-        <select name="false_relay_id">
+        <select name="false_relay_id" data-relay-select data-relay-state-name="false_relay_state">
           <option value="">No relay</option>
           {% for relay in relays %}
           <option value="{{ relay.id }}" {% if relay.id == form.false_relay_id %}selected{% endif %}>{{ relay.name }}</option>

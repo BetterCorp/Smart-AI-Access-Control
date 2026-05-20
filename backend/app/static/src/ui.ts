@@ -99,21 +99,39 @@ function initZoneEditors(root: ParentNode = document): void {
 document.addEventListener("DOMContentLoaded", () => initZoneEditors());
 document.addEventListener("htmx:afterSwap", (event) => initZoneEditors(event.target as ParentNode));
 
-function syncRuleMetricSelect(form: HTMLFormElement): void {
+function syncRuleMetricSelect(form: HTMLFormElement, forceFirst = false): void {
   const monitor = form.querySelector<HTMLSelectElement>("[data-rule-monitor-select]");
   const metric = form.querySelector<HTMLSelectElement>("[data-rule-metric-select]");
   if (!monitor || !metric) return;
-  let selectedStillVisible = false;
   Array.from(metric.options).forEach((option) => {
     const visible = option.dataset.monitorId === monitor.value;
     option.hidden = !visible;
     option.disabled = !visible;
-    if (visible && option.selected) selectedStillVisible = true;
   });
-  if (!selectedStillVisible) {
-    const first = Array.from(metric.options).find((option) => !option.disabled);
-    if (first) metric.value = first.value;
+  const selectedVisible = Array.from(metric.options).some((option) => option.selected && !option.disabled);
+  const first = Array.from(metric.options).find((option) => !option.disabled);
+  if ((forceFirst || !selectedVisible) && first) metric.value = first.value;
+}
+
+function syncRuleOperator(form: HTMLFormElement): void {
+  const operator = form.querySelector<HTMLSelectElement>("[data-rule-operator-select]");
+  const value = form.querySelector<HTMLInputElement>("[data-rule-value-input]");
+  if (!operator || !value) return;
+  const booleanOperator = operator.value === "is_true" || operator.value === "is_false";
+  value.readOnly = booleanOperator;
+  if (booleanOperator) {
+    value.value = "";
+  } else if (!value.value.trim()) {
+    value.value = "0";
   }
+}
+
+function syncRelayState(form: HTMLFormElement, relaySelect: HTMLSelectElement): void {
+  const stateName = relaySelect.dataset.relayStateName;
+  if (!stateName) return;
+  const state = form.querySelector<HTMLSelectElement>(`select[name="${stateName}"]`);
+  if (!state) return;
+  state.disabled = !relaySelect.value;
 }
 
 function initRuleDesigners(root: ParentNode = document): void {
@@ -121,7 +139,13 @@ function initRuleDesigners(root: ParentNode = document): void {
     if (form.dataset.ruleReady === "true") return;
     form.dataset.ruleReady = "true";
     syncRuleMetricSelect(form);
-    form.querySelector("[data-rule-monitor-select]")?.addEventListener("change", () => syncRuleMetricSelect(form));
+    syncRuleOperator(form);
+    form.querySelectorAll<HTMLSelectElement>("[data-relay-select]").forEach((relaySelect) => {
+      syncRelayState(form, relaySelect);
+      relaySelect.addEventListener("change", () => syncRelayState(form, relaySelect));
+    });
+    form.querySelector("[data-rule-monitor-select]")?.addEventListener("change", () => syncRuleMetricSelect(form, true));
+    form.querySelector("[data-rule-operator-select]")?.addEventListener("change", () => syncRuleOperator(form));
   });
 }
 
