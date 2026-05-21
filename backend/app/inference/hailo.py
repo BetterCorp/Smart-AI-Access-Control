@@ -30,10 +30,11 @@ class HailoDetectionFrame:
 
 
 class HailoGStreamerProvider:
-    """Runs one live Hailo/GStreamer detector session per camera/model."""
+    """Runs one Hailo/GStreamer detector session at a time for the single Hailo device."""
 
     def __init__(self) -> None:
         self._sessions: dict[tuple[object, ...], HailoCameraSession] = {}
+        self._active_fingerprint: tuple[object, ...] | None = None
         self._lock = threading.Lock()
         self._telemetry_enabled = False
         self._telemetry_error: str | None = None
@@ -63,6 +64,7 @@ class HailoGStreamerProvider:
     def _latest_frame_for(self, camera: CameraConfig) -> HailoDetectionFrame:
         fingerprint = self.session_fingerprint(camera, "yolov8s")
         with self._lock:
+            self._activate_fingerprint(fingerprint)
             session = self._sessions.get(fingerprint)
             if session is None:
                 session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
@@ -86,6 +88,15 @@ class HailoGStreamerProvider:
 
         return session.latest_frame()
 
+    def _activate_fingerprint(self, fingerprint: tuple[object, ...]) -> None:
+        if self._active_fingerprint == fingerprint:
+            return
+        for key, session in list(self._sessions.items()):
+            if key != fingerprint:
+                session.stop()
+                self._sessions.pop(key, None)
+        self._active_fingerprint = fingerprint
+
     def prune_sessions(self, monitors: list[MonitorConfig], cameras: dict[str, CameraConfig]) -> None:
         active = {
             self.session_fingerprint(camera, "yolov8s")
@@ -97,6 +108,8 @@ class HailoGStreamerProvider:
         with self._lock:
             unused_keys = [key for key in self._sessions if key not in active]
             sessions = [self._sessions.pop(key) for key in unused_keys]
+            if self._active_fingerprint not in self._sessions:
+                self._active_fingerprint = None
         for session in sessions:
             session.stop()
 
@@ -114,6 +127,7 @@ class HailoGStreamerProvider:
         with self._lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()
+            self._active_fingerprint = None
         for session in sessions:
             session.stop()
 
@@ -126,6 +140,7 @@ class HailoGStreamerProvider:
             self._telemetry_enabled = enabled
             sessions = list(self._sessions.values())
             self._sessions.clear()
+            self._active_fingerprint = None
         for session in sessions:
             session.stop()
 
