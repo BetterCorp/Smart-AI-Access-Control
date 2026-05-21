@@ -124,6 +124,59 @@ class DebugInferenceProvider:
         )
 
 
+class BatchDebugInferenceProvider:
+    def __init__(self) -> None:
+        self.batch_calls = 0
+        self.single_calls = 0
+
+    def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
+        self.single_calls += 1
+        return InferenceResult([])
+
+    def results_for_camera(self, monitors: list[MonitorConfig], camera: CameraConfig) -> dict[str, InferenceResult]:
+        self.batch_calls += 1
+        return {
+            monitor.id: InferenceResult(
+                [
+                    Observation(
+                        "core.object_count",
+                        camera.id,
+                        f"{monitor.config.get('class_name', 'person')}.count",
+                        1,
+                        monitor_id=monitor.id,
+                        model_id=monitor.model_id,
+                    )
+                ],
+                debug_jpeg=b"debug-jpeg",
+            )
+            for monitor in monitors
+        }
+
+
+def test_worker_batches_monitors_for_same_camera_when_provider_supports_it(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    repo.save_camera(camera)
+    repo.save_monitor(MonitorConfig("mon-person", "Person", "object_detector", "cam-1", config={"class_name": "person"}))
+    repo.save_monitor(MonitorConfig("mon-backpack", "Backpack", "object_detector", "cam-1", config={"class_name": "backpack"}))
+    inference = BatchDebugInferenceProvider()
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        inference,
+    )
+
+    worker.process_once()
+
+    states = repo.list_monitor_states()
+    assert inference.batch_calls == 1
+    assert inference.single_calls == 0
+    assert {(state["monitor_id"], state["metric"]) for state in states} == {
+        ("mon-person", "person.count"),
+        ("mon-backpack", "backpack.count"),
+    }
+
+
 def test_worker_stores_monitor_debug_snapshot(tmp_path) -> None:
     repo = Repository(Database(tmp_path / "smartai.db"))
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
@@ -172,7 +225,11 @@ def test_worker_uses_monitor_debug_snapshot_for_rule_event(tmp_path) -> None:
 
 
 class FailingInferenceProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
+        self.calls += 1
         raise RuntimeError("Waiting for first Hailo frame from the RTSP pipeline (1s).")
 
 
@@ -192,6 +249,27 @@ def test_worker_records_waiting_monitor_runtime(tmp_path) -> None:
     rows = repo.list_monitor_runtime_rows()
     assert rows[0]["status"] == "waiting"
     assert rows[0]["last_error"].startswith("Waiting for first Hailo frame")
+
+
+def test_worker_reuses_camera_error_for_same_cycle(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    repo.save_camera(camera)
+    repo.save_monitor(MonitorConfig("mon-1", "Person", "object_detector", "cam-1"))
+    repo.save_monitor(MonitorConfig("mon-2", "Backpack", "object_detector", "cam-1"))
+    inference = FailingInferenceProvider()
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        inference,
+    )
+
+    worker.process_once()
+
+    rows = repo.list_monitor_runtime_rows()
+    assert inference.calls == 1
+    assert {row["status"] for row in rows} == {"waiting"}
+    assert all(row["last_error"].startswith("Waiting for first Hailo frame") for row in rows)
 
 
 class FailingRelayDriver:

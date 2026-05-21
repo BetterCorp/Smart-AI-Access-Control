@@ -132,41 +132,74 @@ class Worker:
             prune_sessions(monitors, camera_by_id)
         observations_by_monitor: dict[str, list[Observation]] = {}
         fallback_debug_by_camera: dict[str, bytes | None] = {}
+        camera_cycle_errors: dict[str, tuple[str, str]] = {}
+        processed_monitors: set[str] = set()
+        batch_results_for_camera = getattr(self.inference, "results_for_camera", None)
 
         for monitor in monitors:
+            if monitor.id in processed_monitors:
+                continue
             camera = camera_by_id.get(monitor.camera_id)
             if camera is None or not monitor.enabled:
                 observations_by_monitor[monitor.id] = []
+                processed_monitors.add(monitor.id)
                 self.repo.update_monitor_runtime(
                     monitor.id,
                     "disabled" if not monitor.enabled else "camera_missing",
                 )
                 continue
+            camera_monitors = [
+                candidate
+                for candidate in monitors
+                if candidate.id not in processed_monitors
+                and candidate.enabled
+                and candidate.camera_id == camera.id
+                and camera_by_id.get(candidate.camera_id) is not None
+            ]
+            if camera.id in camera_cycle_errors:
+                status, error = camera_cycle_errors[camera.id]
+                for camera_monitor in camera_monitors:
+                    processed_monitors.add(camera_monitor.id)
+                    observations_by_monitor[camera_monitor.id] = []
+                    self.repo.update_monitor_runtime(camera_monitor.id, status, error)
+                self.repo.set_camera_health(camera.id, "stream_error", error)
+                continue
             try:
-                result = self.inference.result_for(monitor, camera)
-                observations = result.observations
-                observations_by_monitor[monitor.id] = observations
-                for observation in observations:
-                    self.repo.record_observation(observation)
-                debug_jpeg = result.debug_jpeg
-                if debug_jpeg is None:
-                    if camera.id not in fallback_debug_by_camera:
-                        fallback_debug_by_camera[camera.id] = capture_rtsp_jpeg(camera)
-                    debug_jpeg = fallback_debug_by_camera[camera.id]
-                if debug_jpeg is not None:
-                    path = self.snapshot_store.write_monitor_debug_snapshot(monitor.id, debug_jpeg)
-                    self.repo.save_monitor_debug_snapshot(monitor.id, path, datetime.now(timezone.utc))
-                self.repo.update_monitor_runtime(
-                    monitor.id,
-                    "online",
-                    last_success_at=datetime.now(timezone.utc).isoformat(),
+                results = (
+                    batch_results_for_camera(camera_monitors, camera)
+                    if callable(batch_results_for_camera) and len(camera_monitors) > 1
+                    else {monitor.id: self.inference.result_for(monitor, camera)}
                 )
+                result_monitors = camera_monitors if len(results) > 1 else [monitor]
+                for camera_monitor in result_monitors:
+                    processed_monitors.add(camera_monitor.id)
+                    result = results[camera_monitor.id]
+                    observations = result.observations
+                    observations_by_monitor[camera_monitor.id] = observations
+                    for observation in observations:
+                        self.repo.record_observation(observation)
+                    debug_jpeg = result.debug_jpeg
+                    if debug_jpeg is None:
+                        if camera.id not in fallback_debug_by_camera:
+                            fallback_debug_by_camera[camera.id] = capture_rtsp_jpeg(camera)
+                        debug_jpeg = fallback_debug_by_camera[camera.id]
+                    if debug_jpeg is not None:
+                        path = self.snapshot_store.write_monitor_debug_snapshot(camera_monitor.id, debug_jpeg)
+                        self.repo.save_monitor_debug_snapshot(camera_monitor.id, path, datetime.now(timezone.utc))
+                    self.repo.update_monitor_runtime(
+                        camera_monitor.id,
+                        "online",
+                        last_success_at=datetime.now(timezone.utc).isoformat(),
+                    )
                 self.repo.set_camera_health(camera.id, "online")
             except Exception as exc:
-                observations_by_monitor[monitor.id] = []
                 error = str(exc)
                 status = "waiting" if error.startswith("Waiting for first Hailo frame") else "error"
-                self.repo.update_monitor_runtime(monitor.id, status, error)
+                camera_cycle_errors[camera.id] = (status, error)
+                for camera_monitor in camera_monitors:
+                    processed_monitors.add(camera_monitor.id)
+                    observations_by_monitor[camera_monitor.id] = []
+                    self.repo.update_monitor_runtime(camera_monitor.id, status, error)
                 self.repo.set_camera_health(camera.id, "stream_error", error)
 
         relay_commands: list[RelayCommand] = []

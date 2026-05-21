@@ -39,11 +39,28 @@ class HailoGStreamerProvider:
         self._telemetry_error: str | None = None
 
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
+        return self.results_for_camera([monitor], camera)[monitor.id]
+
+    def results_for_camera(self, monitors: list[MonitorConfig], camera: CameraConfig) -> dict[str, InferenceResult]:
+        for monitor in monitors:
+            self._validate_monitor(monitor)
+
+        frame = self._latest_frame_for(camera)
+        return {
+            monitor.id: InferenceResult(
+                observations_for(monitor, camera, frame.detections),
+                debug_jpeg=frame.debug_jpeg,
+            )
+            for monitor in monitors
+        }
+
+    def _validate_monitor(self, monitor: MonitorConfig) -> None:
         if monitor.model_id not in {"object_detector", "person_counter"}:
             raise RuntimeError(
                 f"{monitor.model_id} needs a dedicated Hailo detector before it can run in real inference mode."
             )
 
+    def _latest_frame_for(self, camera: CameraConfig) -> HailoDetectionFrame:
         fingerprint = self.session_fingerprint(camera, "yolov8s")
         with self._lock:
             session = self._sessions.get(fingerprint)
@@ -67,11 +84,7 @@ class HailoGStreamerProvider:
                     self._sessions[fingerprint] = session
                     session.start()
 
-        frame = session.latest_frame()
-        return InferenceResult(
-            observations_for(monitor, camera, frame.detections),
-            debug_jpeg=frame.debug_jpeg,
-        )
+        return session.latest_frame()
 
     def prune_sessions(self, monitors: list[MonitorConfig], cameras: dict[str, CameraConfig]) -> None:
         active = {

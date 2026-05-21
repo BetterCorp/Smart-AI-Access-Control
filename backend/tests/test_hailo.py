@@ -204,6 +204,47 @@ def test_hailo_provider_reuses_one_session_for_same_camera(monkeypatch) -> None:
     ]
 
 
+def test_hailo_provider_batches_monitors_on_one_camera(monkeypatch) -> None:
+    latest_frame_calls = 0
+
+    class FakeSession:
+        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def has_exited(self) -> bool:
+            return False
+
+        def latest_frame(self) -> HailoDetectionFrame:
+            nonlocal latest_frame_calls
+            latest_frame_calls += 1
+            return HailoDetectionFrame(
+                [
+                    Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5)),
+                    Detection("backpack", 0.9, (0.2, 0.1, 0.2, 0.5)),
+                ],
+                debug_jpeg=b"debug",
+            )
+
+    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    person = MonitorConfig("mon-person", "Person", "object_detector", "cam-1", config={"class_name": "person"})
+    backpack = MonitorConfig("mon-backpack", "Backpack", "object_detector", "cam-1", config={"class_name": "backpack"})
+    provider = HailoGStreamerProvider()
+
+    results = provider.results_for_camera([person, backpack], camera)
+
+    assert latest_frame_calls == 1
+    assert results["mon-person"].observations[0].value == 1
+    assert results["mon-backpack"].observations[0].value == 1
+    assert results["mon-person"].debug_jpeg == b"debug"
+
+
 def test_hailo_provider_restarts_sessions_when_telemetry_changes(monkeypatch) -> None:
     stopped: list[bool] = []
     telemetry_values: list[bool] = []
