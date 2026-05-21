@@ -154,6 +154,7 @@ class Database:
                   hailo_telemetry_enabled INTEGER NOT NULL DEFAULT 0,
                   hailo_session_count INTEGER NOT NULL DEFAULT 0,
                   hailo_telemetry_session_count INTEGER NOT NULL DEFAULT 0,
+                  hailo_telemetry_error TEXT,
                   heartbeat_at TEXT NOT NULL
                 );
 
@@ -207,6 +208,7 @@ class Database:
             self._add_column(conn, "worker_status", "hailo_telemetry_enabled", "INTEGER NOT NULL DEFAULT 0")
             self._add_column(conn, "worker_status", "hailo_session_count", "INTEGER NOT NULL DEFAULT 0")
             self._add_column(conn, "worker_status", "hailo_telemetry_session_count", "INTEGER NOT NULL DEFAULT 0")
+            self._add_column(conn, "worker_status", "hailo_telemetry_error", "TEXT")
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -529,14 +531,16 @@ class Repository:
         hailo_telemetry_enabled: bool = False,
         hailo_session_count: int = 0,
         hailo_telemetry_session_count: int = 0,
+        hailo_telemetry_error: str | None = None,
     ) -> None:
         with self.db.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO worker_status
                   (id, inference_mode, relay_hardware_enabled, relay_device_count,
-                   hailo_telemetry_enabled, hailo_session_count, hailo_telemetry_session_count, heartbeat_at)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                   hailo_telemetry_enabled, hailo_session_count, hailo_telemetry_session_count,
+                   hailo_telemetry_error, heartbeat_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   inference_mode = excluded.inference_mode,
                   relay_hardware_enabled = excluded.relay_hardware_enabled,
@@ -544,6 +548,7 @@ class Repository:
                   hailo_telemetry_enabled = excluded.hailo_telemetry_enabled,
                   hailo_session_count = excluded.hailo_session_count,
                   hailo_telemetry_session_count = excluded.hailo_telemetry_session_count,
+                  hailo_telemetry_error = excluded.hailo_telemetry_error,
                   heartbeat_at = excluded.heartbeat_at
                 """,
                 (
@@ -553,6 +558,7 @@ class Repository:
                     1 if hailo_telemetry_enabled else 0,
                     hailo_session_count,
                     hailo_telemetry_session_count,
+                    hailo_telemetry_error,
                     utc_iso(),
                 ),
             )

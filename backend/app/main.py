@@ -820,6 +820,7 @@ def health() -> dict[str, object]:
         "hailoTelemetryEnabled": bool(worker_status["hailo_telemetry_enabled"]) if worker_status else None,
         "hailoSessionCount": int(worker_status["hailo_session_count"]) if worker_status else None,
         "hailoTelemetrySessionCount": int(worker_status["hailo_telemetry_session_count"]) if worker_status else None,
+        "hailoTelemetryError": worker_status["hailo_telemetry_error"] if worker_status else None,
         "db": str(settings.db_path),
         "pid": os.getpid(),
     }

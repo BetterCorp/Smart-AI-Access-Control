@@ -235,3 +235,47 @@ def test_hailo_provider_restarts_sessions_when_telemetry_changes(monkeypatch) ->
 
     assert telemetry_values == [False, True]
     assert stopped == [True]
+
+
+def test_hailo_provider_disables_telemetry_after_monitored_crash(monkeypatch) -> None:
+    telemetry_values: list[bool] = []
+    stopped: list[bool] = []
+
+    class FakeSession:
+        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.telemetry_enabled = telemetry_enabled
+            telemetry_values.append(telemetry_enabled)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            stopped.append(self.telemetry_enabled)
+
+        def has_exited(self) -> bool:
+            return self.telemetry_enabled
+
+        def restart_ready(self) -> bool:
+            return True
+
+        def exit_error(self) -> str:
+            return "Hailo pipeline process exited with SIGSEGV."
+
+        def latest_frame(self) -> HailoDetectionFrame:
+            return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
+
+    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    monitor = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1", config={"confidence_threshold": 0.9})
+    provider = HailoGStreamerProvider()
+    provider.set_telemetry_enabled(True)
+
+    provider.result_for(monitor, camera)
+    result = provider.result_for(monitor, camera)
+
+    assert telemetry_values == [True, False]
+    assert stopped == [True]
+    assert provider.telemetry_status()["enabled"] is False
+    assert provider.telemetry_status()["telemetrySessionCount"] == 0
+    assert "SIGSEGV" in str(provider.telemetry_status()["error"])
+    assert result.observations[0].value == 1

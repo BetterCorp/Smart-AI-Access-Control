@@ -122,6 +122,7 @@ class Worker:
             hailo_telemetry_enabled=bool(hailo_status.get("enabled", False)),
             hailo_session_count=int(hailo_status.get("sessionCount", 0)),
             hailo_telemetry_session_count=int(hailo_status.get("telemetrySessionCount", 0)),
+            hailo_telemetry_error=str(hailo_status["error"]) if hailo_status.get("error") else None,
         )
         cameras = self.repo.list_cameras()
         camera_by_id = {camera.id: camera for camera in cameras}

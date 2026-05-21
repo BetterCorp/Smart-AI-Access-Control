@@ -36,6 +36,7 @@ class HailoGStreamerProvider:
         self._sessions: dict[tuple[object, ...], HailoCameraSession] = {}
         self._lock = threading.Lock()
         self._telemetry_enabled = False
+        self._telemetry_error: str | None = None
 
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         if monitor.model_id not in {"object_detector", "person_counter"}:
@@ -51,12 +52,20 @@ class HailoGStreamerProvider:
                 self._sessions[fingerprint] = session
                 session.start()
             elif session.has_exited():
-                if not session.restart_ready():
-                    raise RuntimeError(session.exit_error())
-                session.stop()
-                session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
-                self._sessions[fingerprint] = session
-                session.start()
+                if session.telemetry_enabled:
+                    self._telemetry_enabled = False
+                    self._telemetry_error = f"disabled after monitored Hailo pipeline exited: {session.exit_error()}"
+                    session.stop()
+                    session = HailoCameraSession(camera, fingerprint, telemetry_enabled=False)
+                    self._sessions[fingerprint] = session
+                    session.start()
+                else:
+                    if not session.restart_ready():
+                        raise RuntimeError(session.exit_error())
+                    session.stop()
+                    session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
+                    self._sessions[fingerprint] = session
+                    session.start()
 
         frame = session.latest_frame()
         return InferenceResult(
@@ -97,6 +106,8 @@ class HailoGStreamerProvider:
 
     def set_telemetry_enabled(self, enabled: bool) -> None:
         with self._lock:
+            if enabled and self._telemetry_error:
+                return
             if enabled == self._telemetry_enabled:
                 return
             self._telemetry_enabled = enabled
@@ -112,6 +123,7 @@ class HailoGStreamerProvider:
                 "enabled": self._telemetry_enabled,
                 "sessionCount": len(sessions),
                 "telemetrySessionCount": sum(1 for session in sessions if session.telemetry_enabled),
+                "error": self._telemetry_error,
             }
 
 
