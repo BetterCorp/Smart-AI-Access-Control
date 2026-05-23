@@ -356,9 +356,25 @@ class Repository:
                 ),
             )
 
-    def delete_camera(self, camera_id: str) -> None:
+    def delete_camera(self, camera_id: str) -> list[Path]:
         with self.db.connect() as conn:
+            debug_paths = [
+                Path(row["path"])
+                for row in conn.execute(
+                    """
+                    SELECT monitor_debug_snapshots.path
+                    FROM monitor_debug_snapshots
+                    JOIN monitors ON monitors.id = monitor_debug_snapshots.monitor_id
+                    WHERE monitors.camera_id = ?
+                    """,
+                    (camera_id,),
+                ).fetchall()
+            ]
+            monitor_ids = [row["id"] for row in conn.execute("SELECT id FROM monitors WHERE camera_id = ?", (camera_id,)).fetchall()]
+            for monitor_id in monitor_ids:
+                self._delete_monitor_rows(conn, monitor_id)
             conn.execute("DELETE FROM cameras WHERE id = ?", (camera_id,))
+        return debug_paths
 
     def list_monitors(self) -> list[MonitorConfig]:
         with self.db.connect() as conn:
@@ -406,10 +422,23 @@ class Repository:
                 (monitor.id, now),
             )
 
-    def delete_monitor(self, monitor_id: str) -> None:
+    def delete_monitor(self, monitor_id: str) -> list[Path]:
         with self.db.connect() as conn:
-            conn.execute("DELETE FROM monitors WHERE id = ?", (monitor_id,))
-            conn.execute("DELETE FROM monitor_runtime WHERE monitor_id = ?", (monitor_id,))
+            debug_paths = [
+                Path(row["path"])
+                for row in conn.execute(
+                    "SELECT path FROM monitor_debug_snapshots WHERE monitor_id = ?",
+                    (monitor_id,),
+                ).fetchall()
+            ]
+            self._delete_monitor_rows(conn, monitor_id)
+        return debug_paths
+
+    def _delete_monitor_rows(self, conn: sqlite3.Connection, monitor_id: str) -> None:
+        conn.execute("DELETE FROM monitors WHERE id = ?", (monitor_id,))
+        conn.execute("DELETE FROM monitor_runtime WHERE monitor_id = ?", (monitor_id,))
+        conn.execute("DELETE FROM monitor_states WHERE monitor_id = ?", (monitor_id,))
+        conn.execute("DELETE FROM monitor_debug_snapshots WHERE monitor_id = ?", (monitor_id,))
 
     def record_observation(self, observation: Observation) -> None:
         if observation.monitor_id is None:

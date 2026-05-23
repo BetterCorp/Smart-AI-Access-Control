@@ -281,6 +281,44 @@ def test_hailo_provider_runs_only_one_camera_session_at_a_time(monkeypatch) -> N
     assert provider.telemetry_status()["sessionCount"] == 1
 
 
+def test_hailo_session_stop_escalates_and_closes_queue() -> None:
+    actions: list[str] = []
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    session = HailoCameraSession(camera, fingerprint=())
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.alive_checks = 0
+
+        def is_alive(self) -> bool:
+            self.alive_checks += 1
+            return self.alive_checks <= 2
+
+        def terminate(self) -> None:
+            actions.append("terminate")
+
+        def kill(self) -> None:
+            actions.append("kill")
+
+        def join(self, timeout=None) -> None:
+            actions.append(f"join:{timeout}")
+
+    class FakeQueue:
+        def close(self) -> None:
+            actions.append("close_queue")
+
+        def join_thread(self) -> None:
+            actions.append("join_queue")
+
+    session._process = FakeProcess()
+    session._queue = FakeQueue()
+
+    session.stop()
+
+    assert actions == ["terminate", "join:2", "kill", "join:2", "close_queue", "join_queue"]
+    assert session._process is None
+
+
 def test_hailo_provider_restarts_sessions_when_telemetry_changes(monkeypatch) -> None:
     stopped: list[bool] = []
     telemetry_values: list[bool] = []

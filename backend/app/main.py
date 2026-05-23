@@ -63,6 +63,14 @@ def wants_fragment(request: Request) -> bool:
     return request.headers.get("HX-Request") == "true"
 
 
+def delete_files(paths: list[Path]) -> None:
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
@@ -276,7 +284,7 @@ def update_monitor(
 
 @app.post("/ui/monitors/{monitor_id}/delete", response_class=HTMLResponse)
 def delete_monitor(request: Request, monitor_id: str) -> Response:
-    repo.delete_monitor(monitor_id)
+    delete_files(repo.delete_monitor(monitor_id))
     if wants_fragment(request):
         return monitors_table(request)
     return RedirectResponse("/monitors", status_code=303)
@@ -352,7 +360,7 @@ def create_camera(
 
 @app.post("/ui/cameras/{camera_id}/delete", response_class=HTMLResponse)
 def delete_camera(request: Request, camera_id: str) -> Response:
-    repo.delete_camera(camera_id)
+    delete_files(repo.delete_camera(camera_id))
     if wants_fragment(request):
         return cameras_table(request)
     return RedirectResponse("/cameras", status_code=303)

@@ -58,7 +58,7 @@ class SnapshotStore:
 
     def records(self) -> list[SnapshotRecord]:
         records = []
-        for path in self.config.snapshot_root.glob("*.jpg"):
+        for path in self.config.snapshot_root.rglob("*.jpg"):
             stat = path.stat()
             records.append(
                 SnapshotRecord(

@@ -126,3 +126,49 @@ def test_monitor_runtime_is_created_and_updated(tmp_path) -> None:
     assert rows[0]["status"] == "error"
     assert rows[0]["last_error"] == "stream failed"
     assert before["monitors"] != after["monitors"]
+
+
+def test_delete_monitor_cleans_runtime_state_and_debug_rows(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
+    debug_path = tmp_path / "snapshots" / "monitor-debug" / "mon-1.jpg"
+    debug_path.parent.mkdir(parents=True)
+    debug_path.write_bytes(b"debug")
+    repo.save_monitor_debug_snapshot("mon-1", debug_path, datetime(2026, 5, 15, tzinfo=timezone.utc))
+    repo.record_observation(
+        Observation(
+            "core.object_count",
+            "cam-1",
+            "person.count",
+            1,
+            timestamp=datetime(2026, 5, 15, tzinfo=timezone.utc),
+            monitor_id="mon-1",
+            model_id="object_detector",
+        )
+    )
+
+    paths = repo.delete_monitor("mon-1")
+
+    assert paths == [debug_path]
+    assert repo.get_monitor("mon-1") is None
+    assert repo.list_monitor_runtime_rows() == []
+    assert repo.list_monitor_states() == []
+    assert repo.get_monitor_debug_snapshot("mon-1") is None
+
+
+def test_delete_camera_cleans_child_monitors(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    repo.save_camera(CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live"))
+    repo.save_monitor(MonitorConfig("mon-1", "Entrance people", "object_detector", "cam-1"))
+    debug_path = tmp_path / "snapshots" / "monitor-debug" / "mon-1.jpg"
+    debug_path.parent.mkdir(parents=True)
+    debug_path.write_bytes(b"debug")
+    repo.save_monitor_debug_snapshot("mon-1", debug_path, datetime(2026, 5, 15, tzinfo=timezone.utc))
+
+    paths = repo.delete_camera("cam-1")
+
+    assert paths == [debug_path]
+    assert repo.get_camera("cam-1") is None
+    assert repo.get_monitor("mon-1") is None
+    assert repo.get_monitor_debug_snapshot("mon-1") is None

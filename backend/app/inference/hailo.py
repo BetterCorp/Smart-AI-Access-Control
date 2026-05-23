@@ -201,6 +201,19 @@ class HailoCameraSession:
         if process.is_alive():
             process.terminate()
         process.join(timeout=2)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=2)
+        self._close_queue()
+        self._process = None
+
+    def _close_queue(self) -> None:
+        close = getattr(self._queue, "close", None)
+        join_thread = getattr(self._queue, "join_thread", None)
+        if callable(close):
+            close()
+        if callable(join_thread):
+            join_thread()
 
     def has_exited(self) -> bool:
         process = self._process

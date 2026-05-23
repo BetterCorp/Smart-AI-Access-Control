@@ -109,9 +109,14 @@ class Worker:
         self._hailo_telemetry_enabled: bool | None = None
 
     def run_forever(self, interval_seconds: float = 1.0) -> None:
-        while True:
-            self.process_once()
-            time.sleep(interval_seconds)
+        try:
+            while True:
+                self.process_once()
+                time.sleep(interval_seconds)
+        finally:
+            close = getattr(self.inference, "close", None)
+            if callable(close):
+                close()
 
     def process_once(self) -> None:
         hailo_status = self._sync_hailo_telemetry_state()

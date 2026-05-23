@@ -272,6 +272,36 @@ def test_worker_reuses_camera_error_for_same_cycle(tmp_path) -> None:
     assert all(row["last_error"].startswith("Waiting for first Hailo frame") for row in rows)
 
 
+def test_worker_closes_inference_on_shutdown(tmp_path) -> None:
+    repo = Repository(Database(tmp_path / "smartai.db"))
+
+    class ClosingInferenceProvider:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    inference = ClosingInferenceProvider()
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        inference,
+    )
+
+    def stop_after_once() -> None:
+        raise KeyboardInterrupt
+
+    worker.process_once = stop_after_once
+
+    try:
+        worker.run_forever(interval_seconds=0)
+    except KeyboardInterrupt:
+        pass
+
+    assert inference.closed is True
+
+
 class FailingRelayDriver:
     def device_count(self) -> int:
         return 1

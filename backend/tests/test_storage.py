@@ -23,3 +23,20 @@ def test_snapshot_prune_deletes_oldest_until_under_limit(tmp_path) -> None:
     assert (tmp_path / "evt-new.jpg").exists()
     assert store.current_usage_bytes() <= 8
 
+
+def test_snapshot_prune_includes_monitor_debug_files(tmp_path) -> None:
+    store = SnapshotStore(StorageConfig(snapshot_root=tmp_path, max_bytes=8, min_free_disk_percent=0))
+
+    old_debug = store.write_monitor_debug_snapshot("mon-old", b"123456")
+    old_time = datetime(2026, 5, 15, 8, 0, tzinfo=timezone.utc).timestamp()
+    import os
+
+    os.utime(old_debug, (old_time, old_time))
+    event = store.write_snapshot("evt-new", b"abcdef", datetime(2026, 5, 15, 9, 0, tzinfo=timezone.utc))
+
+    deleted = store.prune()
+
+    assert old_debug in deleted
+    assert not old_debug.exists()
+    assert (tmp_path / event.filename).exists()
+    assert store.current_usage_bytes() <= 8
