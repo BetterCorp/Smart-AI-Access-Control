@@ -1,0 +1,15 @@
+[Unit]
+Description=Smart AI Access Control Cleanup
+
+[Service]
+Type=oneshot
+User=smartai
+Group=smartai
+WorkingDirectory=/opt/smart-ai-access-control
+Environment=PYTHONUNBUFFERED=1
+Environment=SMARTAI_DATA_DIR=/var/lib/smartai
+Environment=SMARTAI_DB=/var/lib/smartai/smartai.db
+Environment=SMARTAI_SNAPSHOT_ROOT=/var/lib/smartai/snapshots
+ExecStart=/opt/smart-ai-access-control/.venv/bin/python -m backend.app.maintenance
+NoNewPrivileges=true
+PrivateTmp=true

@@ -186,6 +186,8 @@ install_systemd() {
   log "Installing systemd services"
   install -m 0644 "${APP_DIR}/deploy/systemd/smartai-api.service" /etc/systemd/system/smartai-api.service
   install -m 0644 "${APP_DIR}/deploy/systemd/smartai-worker.service" /etc/systemd/system/smartai-worker.service
+  install -m 0644 "${APP_DIR}/deploy/systemd/smartai-cleanup.service" /etc/systemd/system/smartai-cleanup.service
+  install -m 0644 "${APP_DIR}/deploy/systemd/smartai-cleanup.timer" /etc/systemd/system/smartai-cleanup.timer
 
   mkdir -p /etc/systemd/system/smartai-worker.service.d
   cat >/etc/systemd/system/smartai-worker.service.d/override.conf <<EOF
@@ -198,8 +200,20 @@ Environment=HAILO_MONITOR_TIME_INTERVAL=${HAILO_MONITOR_INTERVAL_MS}
 Environment=HAILORT_LOGGER_PATH=${DATA_DIR}
 EOF
 
+  mkdir -p /etc/systemd/system/smartai-cleanup.service.d
+  cat >/etc/systemd/system/smartai-cleanup.service.d/override.conf <<EOF
+[Service]
+Environment=SMARTAI_DATA_DIR=${DATA_DIR}
+Environment=SMARTAI_DB=${DATA_DIR}/smartai.db
+Environment=SMARTAI_SNAPSHOT_ROOT=${DATA_DIR}/snapshots
+Environment=SMARTAI_LOG_RETENTION_DAYS=${SMARTAI_LOG_RETENTION_DAYS:-7}
+Environment=SMARTAI_LOG_MAX_BYTES=${SMARTAI_LOG_MAX_BYTES:-52428800}
+Environment=SMARTAI_CLEANUP_SNAPSHOT_BATCH_SIZE=${SMARTAI_CLEANUP_SNAPSHOT_BATCH_SIZE:-500}
+EOF
+
   systemctl daemon-reload
-  systemctl enable smartai-api.service smartai-worker.service
+  systemctl enable smartai-api.service smartai-worker.service smartai-cleanup.timer
+  systemctl enable --now smartai-cleanup.timer
   systemctl restart smartai-api.service smartai-worker.service
 }
 

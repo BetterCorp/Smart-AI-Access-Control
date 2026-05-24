@@ -90,6 +90,7 @@ Deployment is split into two scripts:
 - install Node.js/npm and build TypeScript assets from source,
 - install the Debian `usbrelay` CLI used by the relay driver,
 - install systemd services,
+- install an hourly `smartai-cleanup.timer` to prune snapshots and app-owned old logs,
 - serve the web API with two Uvicorn worker processes,
 - enable HailoRT monitor telemetry for the worker at a conservative 5-second interval,
 - install an aggressive Raspberry Pi 5 fan curve in `/boot/firmware/config.txt`,
@@ -141,10 +142,14 @@ sudo env \
   SMARTAI_ENABLE_HAILO_MONITOR=1 \
   SMARTAI_HAILO_MONITOR_INTERVAL_MS=5000 \
   SMARTAI_ENABLE_PI_FAN_TUNING=1 \
+  SMARTAI_LOG_RETENTION_DAYS=7 \
+  SMARTAI_LOG_MAX_BYTES=52428800 \
   SMARTAI_HAILO_APPS_REF=main \
   SMARTAI_ENABLE_UFW=1 \
   /opt/smart-ai-access-control/scripts/pi-setup.sh
 ```
+
+Cleanup runs hourly through `smartai-cleanup.timer`. It applies the configured snapshot storage limits, including monitor debug snapshots under `snapshots/monitor-debug`, and removes app-owned `*.log` / rotated `.log.*` files under `/var/lib/smartai` by age and total size.
 
 Fan tuning writes a marked Smart AI Access Control block to `/boot/firmware/config.txt` and replaces only that block on future runs. Disable it with `SMARTAI_ENABLE_PI_FAN_TUNING=0`. The default curve starts cooling earlier than Raspberry Pi OS defaults: 40C at 50% PWM, 50C at 75% PWM, 60C at 88% PWM, and 70C at 100% PWM. A reboot is required for boot config changes to take effect.
 

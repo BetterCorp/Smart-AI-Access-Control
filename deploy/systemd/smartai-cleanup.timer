@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Smart AI Access Control cleanup hourly
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=smartai-cleanup.service
+
+[Install]
+WantedBy=timers.target
