@@ -381,17 +381,13 @@ class HailoPipelineRunner:
         try:
             cv2 = bindings["cv2"]
             get_caps_from_pad = bindings["get_caps_from_pad"]
-            get_numpy_from_buffer = bindings["get_numpy_from_buffer"]
             pad = element.get_static_pad("sink")
             if pad is None:
                 return None
             frame_format, width, height = get_caps_from_pad(pad)
             if frame_format is None or width is None or height is None:
                 return None
-            try:
-                frame = get_numpy_from_buffer(buffer, frame_format, width, height)
-            except Exception:
-                frame = self._map_debug_frame(buffer, frame_format, width, height, bindings)
+            frame = self._map_debug_frame(buffer, frame_format, width, height, bindings)
             if frame is None:
                 return None
             if self._frame_looks_blank(frame, bindings):

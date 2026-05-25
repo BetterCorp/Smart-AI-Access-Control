@@ -146,7 +146,7 @@ def test_hailo_debug_snapshot_failure_does_not_drop_observations() -> None:
             "hailo": FakeHailo(),
             "cv2": object(),
             "get_caps_from_pad": lambda _pad: ("RGB", 640, 640),
-            "get_numpy_from_buffer": lambda *_args: (_ for _ in ()).throw(RuntimeError("snapshot failed")),
+            "Gst": type("FakeGst", (), {"MapFlags": type("MapFlags", (), {"READ": object()})}),
         },
     )
 
