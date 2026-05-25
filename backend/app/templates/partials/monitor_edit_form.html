@@ -2,6 +2,8 @@
   <h3>Edit Monitor</h3>
   <form
     class="form-grid"
+    method="post"
+    action="/ui/monitors/{{ monitor.id }}"
     hx-post="/ui/monitors/{{ monitor.id }}"
     hx-target="#monitors-table"
     hx-swap="outerHTML"

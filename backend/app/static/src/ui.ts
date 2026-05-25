@@ -1,3 +1,18 @@
+declare global {
+  interface Window {
+    htmx?: {
+      process: (element: Element) => void;
+    };
+  }
+}
+
+function processDynamicContent(root: Element): void {
+  window.htmx?.process(root);
+  initTelemetryPanels(root);
+  initZoneEditors(root);
+  initRuleDesigners(root);
+}
+
 document.addEventListener("htmx:responseError", (event) => {
   console.error("HTMX request failed", event);
 });
@@ -11,8 +26,14 @@ function refreshLiveFragments(eventName: string): void {
     const html = await response.text();
     if (element.dataset.liveSwap === "innerHTML") {
       element.innerHTML = html;
+      processDynamicContent(element);
     } else {
-      element.outerHTML = html;
+      const template = document.createElement("template");
+      template.innerHTML = html.trim();
+      const replacement = template.content.firstElementChild;
+      if (!(replacement instanceof HTMLElement)) return;
+      element.replaceWith(replacement);
+      processDynamicContent(replacement);
     }
   });
 }
@@ -170,3 +191,5 @@ function initRuleDesigners(root: ParentNode = document): void {
 
 document.addEventListener("DOMContentLoaded", () => initRuleDesigners());
 document.addEventListener("htmx:afterSwap", (event) => initRuleDesigners(event.target as ParentNode));
+
+export {};
