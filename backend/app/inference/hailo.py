@@ -30,10 +30,10 @@ class HailoDetectionFrame:
 
 
 class HailoGStreamerProvider:
-    """Runs one Hailo/GStreamer detector session at a time for the single Hailo device."""
+    """Runs one multistream Hailo/GStreamer detector session for the single Hailo device."""
 
     def __init__(self) -> None:
-        self._sessions: dict[tuple[object, ...], HailoCameraSession] = {}
+        self._session: HailoMultiCameraSession | None = None
         self._restart_after: dict[tuple[object, ...], float] = {}
         self._active_fingerprint: tuple[object, ...] | None = None
         self._lock = threading.Lock()
@@ -65,38 +65,66 @@ class HailoGStreamerProvider:
             )
 
     def _latest_frame_for(self, camera: CameraConfig) -> HailoDetectionFrame:
-        fingerprint = self.session_fingerprint(camera, "yolov8s")
+        camera_fingerprint = self.session_fingerprint(camera, "yolov8s")
         with self._lock:
-            self._activate_fingerprint(fingerprint)
-            session = self._sessions.get(fingerprint)
-            if session is None:
-                self._raise_if_restart_backoff_active(fingerprint)
-                session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
-                self._sessions[fingerprint] = session
-                session.start()
-            elif session.has_exited():
+            session = self._session
+            if session is None or not session.has_camera(camera.id):
+                fingerprint = self.multi_session_fingerprint([camera])
+                self._start_session_locked([camera], fingerprint)
+                session = self._session
+                if session is None:
+                    raise RuntimeError("Hailo pipeline session failed to start.")
+            drain_messages = getattr(session, "_drain_messages", None)
+            if callable(drain_messages):
+                drain_messages()
+            if session.has_exited():
+                cameras = session.cameras
+                fingerprint = session.fingerprint
                 if session.telemetry_enabled:
                     self._telemetry_enabled = False
                     self._telemetry_error = f"disabled after monitored Hailo pipeline exited: {session.exit_error()}"
                     session.stop()
-                    session = HailoCameraSession(camera, fingerprint, telemetry_enabled=False)
-                    self._sessions[fingerprint] = session
-                    session.start()
+                    self._session = None
+                    self._start_session_locked(cameras, fingerprint, telemetry_enabled=False)
+                    session = self._session
                 else:
                     if not session.restart_ready():
                         raise RuntimeError(session.exit_error())
                     session.stop()
-                    session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
-                    self._sessions[fingerprint] = session
-                    session.start()
+                    self._session = None
+                    self._start_session_locked(cameras, fingerprint)
+                    session = self._session
             elif session_first_frame_timed_out(session):
                 error = session.first_frame_timeout_error()
                 session.stop()
-                self._sessions.pop(fingerprint, None)
-                self._restart_after[fingerprint] = time.monotonic() + HailoCameraSession.restart_backoff_seconds
+                self._session = None
+                self._active_fingerprint = None
+                self._restart_after[session.fingerprint] = (
+                    time.monotonic() + HailoMultiCameraSession.restart_backoff_seconds
+                )
                 raise RuntimeError(f"{error} Hailo session was stopped to release the device.")
+            if session is None:
+                raise RuntimeError("Hailo pipeline session is not running.")
+            if camera_fingerprint not in session.camera_fingerprints:
+                raise RuntimeError(f"Camera {camera.id} is not active in the Hailo pipeline session.")
 
-        return session.latest_frame()
+        return session.latest_frame(camera.id)
+
+    def _start_session_locked(
+        self,
+        cameras: list[CameraConfig],
+        fingerprint: tuple[object, ...],
+        *,
+        telemetry_enabled: bool | None = None,
+    ) -> None:
+        if self._session is not None:
+            self._session.stop()
+        self._raise_if_restart_backoff_active(fingerprint)
+        enabled = self._telemetry_enabled if telemetry_enabled is None else telemetry_enabled
+        session = HailoMultiCameraSession(cameras, fingerprint, telemetry_enabled=enabled)
+        self._session = session
+        self._active_fingerprint = fingerprint
+        session.start()
 
     def _raise_if_restart_backoff_active(self, fingerprint: tuple[object, ...]) -> None:
         restart_after = self._restart_after.get(fingerprint)
@@ -108,33 +136,34 @@ class HailoGStreamerProvider:
             raise RuntimeError(f"Waiting for first Hailo frame restart backoff ({remaining:.0f}s).")
         self._restart_after.pop(fingerprint, None)
 
-    def _activate_fingerprint(self, fingerprint: tuple[object, ...]) -> None:
-        if self._active_fingerprint == fingerprint:
-            return
-        for key, session in list(self._sessions.items()):
-            if key != fingerprint:
-                session.stop()
-                self._sessions.pop(key, None)
-                self._restart_after.pop(key, None)
-        self._active_fingerprint = fingerprint
-
     def prune_sessions(self, monitors: list[MonitorConfig], cameras: dict[str, CameraConfig]) -> None:
-        active = {
-            self.session_fingerprint(camera, "yolov8s")
-            for monitor in monitors
-            if monitor.enabled
-            if monitor.model_id in {"object_detector", "person_counter"}
-            if (camera := cameras.get(monitor.camera_id)) is not None
-        }
+        active_by_id: dict[str, CameraConfig] = {}
+        for monitor in monitors:
+            if not monitor.enabled or monitor.model_id not in {"object_detector", "person_counter"}:
+                continue
+            camera = cameras.get(monitor.camera_id)
+            if camera is not None:
+                active_by_id[camera.id] = camera
+        active_cameras = sorted(active_by_id.values(), key=lambda item: item.id)
+        active_fingerprint = self.multi_session_fingerprint(active_cameras) if active_cameras else None
+        stale_session: HailoMultiCameraSession | None = None
         with self._lock:
-            unused_keys = [key for key in self._sessions if key not in active]
-            sessions = [self._sessions.pop(key) for key in unused_keys]
-            for key in unused_keys:
-                self._restart_after.pop(key, None)
-            if self._active_fingerprint not in self._sessions:
+            if active_fingerprint is None:
+                stale_session = self._session
+                self._session = None
                 self._active_fingerprint = None
-        for session in sessions:
-            session.stop()
+                self._restart_after.clear()
+            elif active_fingerprint != self._active_fingerprint:
+                self._start_session_locked(active_cameras, active_fingerprint)
+        if stale_session is not None:
+            stale_session.stop()
+
+    @staticmethod
+    def multi_session_fingerprint(cameras: list[CameraConfig]) -> tuple[object, ...]:
+        return tuple(
+            HailoGStreamerProvider.session_fingerprint(camera, "yolov8s")
+            for camera in sorted(cameras, key=lambda item: item.id)
+        )
 
     @staticmethod
     def session_fingerprint(camera: CameraConfig, detector_model_id: str) -> tuple[object, ...]:
@@ -148,11 +177,11 @@ class HailoGStreamerProvider:
 
     def close(self) -> None:
         with self._lock:
-            sessions = list(self._sessions.values())
-            self._sessions.clear()
+            session = self._session
+            self._session = None
             self._restart_after.clear()
             self._active_fingerprint = None
-        for session in sessions:
+        if session is not None:
             session.stop()
 
     def set_telemetry_enabled(self, enabled: bool) -> None:
@@ -170,23 +199,167 @@ class HailoGStreamerProvider:
             if enabled == self._telemetry_enabled:
                 return
             self._telemetry_enabled = enabled
-            sessions = list(self._sessions.values())
-            self._sessions.clear()
+            session = self._session
+            self._session = None
             self._restart_after.clear()
             self._active_fingerprint = None
-        for session in sessions:
+        if session is not None:
             session.stop()
 
     def telemetry_status(self) -> dict[str, object]:
         with self._lock:
-            sessions = list(self._sessions.values())
+            session = self._session
             return {
                 "requested": self._telemetry_requested,
                 "enabled": self._telemetry_enabled,
-                "sessionCount": len(sessions),
-                "telemetrySessionCount": sum(1 for session in sessions if session.telemetry_enabled),
+                "sessionCount": 1 if session is not None else 0,
+                "telemetrySessionCount": 1 if session is not None and session.telemetry_enabled else 0,
                 "error": self._telemetry_error,
             }
+
+
+class HailoMultiCameraSession:
+    first_frame_timeout_seconds = 15.0
+    restart_backoff_seconds = 5.0
+
+    def __init__(
+        self,
+        cameras: list[CameraConfig],
+        fingerprint: tuple[object, ...],
+        *,
+        telemetry_enabled: bool = False,
+    ) -> None:
+        self.cameras = list(cameras)
+        self.fingerprint = fingerprint
+        self.camera_fingerprints = set(fingerprint)
+        self.telemetry_enabled = telemetry_enabled
+        self._latest_frames: dict[str, HailoDetectionFrame] = {}
+        self._latest_errors: dict[str, str] = {}
+        self._latest_bus_message: str | None = None
+        self._started_at = time.monotonic()
+        self._restart_after: float | None = None
+        self._queue: Any = mp.get_context("spawn").Queue(maxsize=max(10, len(cameras) * 3))
+        self._process: mp.Process | None = None
+        self._lock = threading.Lock()
+
+    def has_camera(self, camera_id: str) -> bool:
+        return any(camera.id == camera_id for camera in self.cameras)
+
+    def start(self) -> None:
+        self._process = mp.get_context("spawn").Process(
+            target=run_hailo_multi_child,
+            args=(self.cameras, self._queue, self.telemetry_enabled),
+            name="hailo-multicamera",
+            daemon=True,
+        )
+        previous_monitor = os.environ.get("HAILO_MONITOR")
+        previous_interval = os.environ.get("HAILO_MONITOR_TIME_INTERVAL")
+        os.environ["HAILO_MONITOR"] = "1" if self.telemetry_enabled else "0"
+        os.environ.setdefault("HAILO_MONITOR_TIME_INTERVAL", "5000")
+        try:
+            self._process.start()
+        finally:
+            restore_env("HAILO_MONITOR", previous_monitor)
+            restore_env("HAILO_MONITOR_TIME_INTERVAL", previous_interval)
+
+    def stop(self) -> None:
+        process = self._process
+        if process is None:
+            return
+        if process.is_alive():
+            process.terminate()
+        process.join(timeout=3)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=3)
+        self._close_queue()
+        self._process = None
+
+    def _close_queue(self) -> None:
+        close = getattr(self._queue, "close", None)
+        join_thread = getattr(self._queue, "join_thread", None)
+        if callable(close):
+            close()
+        if callable(join_thread):
+            join_thread()
+
+    def has_exited(self) -> bool:
+        process = self._process
+        if process is None or process.exitcode is None:
+            return False
+        with self._lock:
+            if self._restart_after is None:
+                self._restart_after = time.monotonic() + self.restart_backoff_seconds
+        return True
+
+    def restart_ready(self) -> bool:
+        with self._lock:
+            return self._restart_after is not None and time.monotonic() >= self._restart_after
+
+    def first_frame_timed_out(self) -> bool:
+        with self._lock:
+            if len(self._latest_frames) == len(self.cameras) or self._latest_errors:
+                return False
+            process = self._process
+            if process is None or process.exitcode is not None:
+                return False
+            return self.first_frame_wait_seconds() >= self.first_frame_timeout_seconds
+
+    def first_frame_wait_seconds(self) -> float:
+        return time.monotonic() - self._started_at
+
+    def first_frame_timeout_error(self) -> str:
+        waiting = [camera.name for camera in self.cameras if camera.id not in self._latest_frames]
+        waiting_text = ", ".join(waiting) if waiting else "unknown camera"
+        detail = f" Latest pipeline message: {self._latest_bus_message}" if self._latest_bus_message else ""
+        return (
+            f"No Hailo frame received after {self.first_frame_wait_seconds():.0f}s "
+            f"from the RTSP pipeline for: {waiting_text}.{detail}"
+        )
+
+    def exit_error(self) -> str:
+        process = self._process
+        if process is None or process.exitcode is None:
+            return "Hailo pipeline process is not running."
+        return format_child_exit(process.exitcode)
+
+    def latest_frame(self, camera_id: str) -> HailoDetectionFrame:
+        self._drain_messages()
+        with self._lock:
+            if camera_id in self._latest_frames:
+                return self._latest_frames[camera_id]
+            if camera_id in self._latest_errors:
+                raise RuntimeError(self._latest_errors[camera_id])
+            process = self._process
+            if process is not None and process.exitcode is not None:
+                raise RuntimeError(format_child_exit(process.exitcode))
+            waited = self.first_frame_wait_seconds()
+            bus_message = self._latest_bus_message
+        detail = f" Latest pipeline message: {bus_message}" if bus_message else ""
+        if waited >= self.first_frame_timeout_seconds:
+            raise RuntimeError(f"No Hailo frame received after {waited:.0f}s from the RTSP pipeline.{detail}")
+        raise RuntimeError(f"Waiting for first Hailo frame from the RTSP pipeline ({waited:.0f}s).{detail}")
+
+    def _drain_messages(self) -> None:
+        while True:
+            try:
+                kind, payload = self._queue.get_nowait()
+            except queue.Empty:
+                return
+            with self._lock:
+                if kind == "result":
+                    camera_id, frame = payload
+                    self._latest_frames[str(camera_id)] = frame
+                    self._latest_errors.pop(str(camera_id), None)
+                elif kind == "camera_error":
+                    camera_id, error = payload
+                    self._latest_errors[str(camera_id)] = str(error)
+                elif kind == "error":
+                    error = str(payload)
+                    for camera in self.cameras:
+                        self._latest_errors[camera.id] = error
+                elif kind == "bus":
+                    self._latest_bus_message = str(payload)
 
 
 class HailoCameraSession:
@@ -451,6 +624,61 @@ class HailoPipelineRunner:
             self.output_queue.put_nowait((kind, payload))
 
 
+class HailoMultiPipelineRunner(HailoPipelineRunner):
+    def __init__(self, cameras: list[CameraConfig], output_queue: Any) -> None:
+        self.cameras = list(cameras)
+        self.output_queue = output_queue
+        self._loop: Any = None
+        self._pipeline: Any = None
+
+    def run(self) -> None:
+        try:
+            bindings = load_hailo_bindings()
+            resources = resolve_detection_resources(bindings)
+            pipeline_string = build_multisource_detection_pipeline(bindings, self.cameras, resources)
+            Gst = bindings["Gst"]
+            GLib = bindings["GLib"]
+            Gst.init(None)
+            pipeline = Gst.parse_launch(pipeline_string)
+            for index, camera in enumerate(self.cameras):
+                identity = pipeline.get_by_name(f"src_{index}_callback")
+                if identity is None:
+                    raise RuntimeError(f"Hailo multistream pipeline is missing src_{index}_callback.")
+                identity.set_property("signal-handoffs", True)
+                identity.connect("handoff", self._on_camera_handoff, bindings, camera.id)
+
+            bus = pipeline.get_bus()
+            bus.add_signal_watch()
+            bus.connect("message", self._on_bus_message, bindings)
+
+            loop = GLib.MainLoop()
+            self._pipeline = pipeline
+            self._loop = loop
+            pipeline.set_state(Gst.State.PLAYING)
+            loop.run()
+        except Exception as exc:
+            self._publish("error", str(exc))
+        finally:
+            pipeline = self._pipeline
+            if pipeline is not None:
+                try:
+                    pipeline.set_state(load_hailo_bindings()["Gst"].State.NULL)
+                except Exception:
+                    pass
+
+    def _on_camera_handoff(self, element: Any, buffer: Any, bindings: dict[str, Any], camera_id: str) -> None:
+        try:
+            hailo = bindings["hailo"]
+
+            roi = hailo.get_roi_from_buffer(buffer)
+            hailo_detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
+            detections = [detection_from_hailo(item) for item in hailo_detections]
+            debug_jpeg = self._build_debug_jpeg(element, buffer, bindings)
+            self._publish("result", (camera_id, HailoDetectionFrame(detections, debug_jpeg=debug_jpeg)))
+        except Exception as exc:
+            self._publish("camera_error", (camera_id, str(exc)))
+
+
 def run_hailo_child(camera: CameraConfig, output_queue: Any, telemetry_enabled: bool = False) -> None:
     os.environ["HAILO_MONITOR"] = "1" if telemetry_enabled else "0"
     os.environ.setdefault("HAILO_MONITOR_TIME_INTERVAL", "5000")
@@ -459,6 +687,20 @@ def run_hailo_child(camera: CameraConfig, output_queue: Any, telemetry_enabled: 
     except Exception:
         pass
     HailoPipelineRunner(camera, output_queue).run()
+
+
+def run_hailo_multi_child(
+    cameras: list[CameraConfig],
+    output_queue: Any,
+    telemetry_enabled: bool = False,
+) -> None:
+    os.environ["HAILO_MONITOR"] = "1" if telemetry_enabled else "0"
+    os.environ.setdefault("HAILO_MONITOR_TIME_INTERVAL", "5000")
+    try:
+        output_queue.put_nowait(("bus", f"Hailo multistream telemetry enabled: {os.environ['HAILO_MONITOR']}"))
+    except Exception:
+        pass
+    HailoMultiPipelineRunner(cameras, output_queue).run()
 
 
 def restore_env(key: str, value: str | None) -> None:
@@ -688,6 +930,81 @@ def build_detection_pipeline(
         "video/x-raw,format=RGB ! "
         f"{callback} ! "
         "fakesink sync=false"
+    )
+
+
+def build_multisource_detection_pipeline(
+    bindings: dict[str, Any],
+    cameras: list[CameraConfig],
+    resources: HailoPipelineResources,
+) -> str:
+    if not cameras:
+        raise RuntimeError("At least one camera is required for the Hailo multistream pipeline.")
+
+    sources: list[str] = []
+    router_properties: list[str] = []
+    router_branches: list[str] = []
+    for index, camera in enumerate(cameras):
+        analytics_fps = max(1, round(camera.analytics_fps))
+        source = build_multisource_rtsp_video_source_pipeline(camera, index, analytics_fps)
+        sources.append(
+            f"{source} ! "
+            f"queue name=src_{index}_to_robin_q leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+            f"robin.sink_{index}"
+        )
+        router_properties.append(f'src_{index}::input-streams="<sink_{index}>"')
+        router_branches.append(
+            f"router.src_{index} ! "
+            f"queue name=router_src_{index}_q leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+            "videoconvert ! "
+            "video/x-raw,format=RGB ! "
+            f"{bindings['USER_CALLBACK_PIPELINE'](name=f'src_{index}_callback')} ! "
+            "fakesink sync=false"
+        )
+
+    inference = bindings["INFERENCE_PIPELINE"](
+        hef_path=resources.hef_path,
+        post_process_so=resources.post_process_so,
+        post_function_name=resources.post_function_name,
+        batch_size=1,
+        config_json=resources.labels_json,
+        additional_params=(
+            "nms-score-threshold=0.3 "
+            "nms-iou-threshold=0.45 "
+            "output-format-type=HAILO_FORMAT_TYPE_FLOAT32"
+        ),
+    )
+    tracker = bindings["TRACKER_PIPELINE"](class_id=-1)
+    # Non-blocking mode keeps healthy cameras moving when one RTSP source stalls.
+    multistream = (
+        "hailoroundrobin mode=2 queue-size=3 retries-num=1 name=robin ! "
+        "queue name=hailo_pre_infer_multistream_q leaky=downstream max-size-buffers=6 max-size-bytes=0 max-size-time=0 ! "
+        f"{inference} ! "
+        f"{tracker} ! "
+        "queue name=hailo_router_input_q leaky=downstream max-size-buffers=6 max-size-bytes=0 max-size-time=0 ! "
+        f"hailostreamrouter name=router {' '.join(router_properties)}"
+    )
+    return " ".join([*sources, multistream, *router_branches])
+
+
+def build_multisource_rtsp_video_source_pipeline(
+    camera: CameraConfig,
+    source_index: int,
+    analytics_fps: int,
+) -> str:
+    protocols = "tcp" if camera.transport.lower() == "tcp" else "udp"
+    return (
+        f'rtspsrc location="{build_rtsp_url(camera)}" protocols={protocols} latency=100 name=source_{source_index} ! '
+        "application/x-rtp,media=video ! "
+        f"queue name=source_{source_index}_queue_decode leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+        f"decodebin name=source_{source_index}_decodebin ! "
+        f"queue name=source_{source_index}_scale_q leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+        f"videoscale name=source_{source_index}_videoscale n-threads=2 ! "
+        f"queue name=source_{source_index}_convert_q leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! "
+        f"videoconvert n-threads=2 name=source_{source_index}_convert qos=false ! "
+        "video/x-raw,pixel-aspect-ratio=1/1,format=RGB,width=640,height=640 ! "
+        f'videorate name=source_{source_index}_videorate ! '
+        f'capsfilter name=source_{source_index}_fps_caps caps="video/x-raw,framerate={analytics_fps}/1"'
     )
 
 

@@ -8,6 +8,7 @@ from backend.app.inference.hailo import (
     HailoPipelineRunner,
     HailoPipelineResources,
     build_detection_pipeline,
+    build_multisource_detection_pipeline,
     build_rtsp_video_source_pipeline,
     format_child_exit,
     observations_for,
@@ -92,6 +93,32 @@ def test_hailo_pipeline_keeps_callback_before_headless_sink() -> None:
     assert "hailooverlay" not in pipeline
 
 
+def test_hailo_multisource_pipeline_routes_each_camera_after_one_detector() -> None:
+    bindings = {
+        "INFERENCE_PIPELINE": lambda **_kwargs: "inference",
+        "TRACKER_PIPELINE": lambda class_id: f"tracker({class_id})",
+        "USER_CALLBACK_PIPELINE": lambda name="identity_callback": f"queue ! identity name={name}",
+    }
+    cameras = [
+        CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live", analytics_fps=2),
+        CameraConfig("cam-2", "Exit", "192.168.1.51", 554, "/live", analytics_fps=1),
+    ]
+
+    pipeline = build_multisource_detection_pipeline(
+        bindings,
+        cameras,
+        HailoPipelineResources("/tmp/model.hef", "/tmp/post.so", "filter", None),
+    )
+
+    assert pipeline.count("hailoroundrobin") == 1
+    assert pipeline.count("inference") == 1
+    assert "mode=2" in pipeline
+    assert 'src_0::input-streams="<sink_0>"' in pipeline
+    assert 'src_1::input-streams="<sink_1>"' in pipeline
+    assert "identity name=src_0_callback" in pipeline
+    assert "identity name=src_1_callback" in pipeline
+
+
 def test_rtsp_source_pipeline_selects_video_media_only() -> None:
     pipeline = build_rtsp_video_source_pipeline("rtsp://camera/live", analytics_fps=2)
 
@@ -160,11 +187,15 @@ def test_hailo_provider_reuses_one_session_for_same_camera(monkeypatch) -> None:
     created: list[tuple[object, ...]] = []
 
     class FakeSession:
-        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
-            self.camera = camera
+        def __init__(self, cameras: list[CameraConfig], fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.cameras = cameras
             self.fingerprint = fingerprint
+            self.camera_fingerprints = set(fingerprint)
             self.telemetry_enabled = telemetry_enabled
             created.append(fingerprint)
+
+        def has_camera(self, camera_id: str) -> bool:
+            return any(camera.id == camera_id for camera in self.cameras)
 
         def start(self) -> None:
             pass
@@ -181,10 +212,10 @@ def test_hailo_provider_reuses_one_session_for_same_camera(monkeypatch) -> None:
         def exit_error(self) -> str:
             return ""
 
-        def latest_frame(self) -> HailoDetectionFrame:
+        def latest_frame(self, _camera_id: str) -> HailoDetectionFrame:
             return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
 
-    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoMultiCameraSession", FakeSession)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     first = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1", config={"confidence_threshold": 0.9})
     second = MonitorConfig("mon-2", "Loose", "object_detector", "cam-1", config={"confidence_threshold": 0.5})
@@ -208,8 +239,14 @@ def test_hailo_provider_batches_monitors_on_one_camera(monkeypatch) -> None:
     latest_frame_calls = 0
 
     class FakeSession:
-        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
-            pass
+        def __init__(self, cameras: list[CameraConfig], fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.cameras = cameras
+            self.fingerprint = fingerprint
+            self.camera_fingerprints = set(fingerprint)
+            self.telemetry_enabled = telemetry_enabled
+
+        def has_camera(self, camera_id: str) -> bool:
+            return any(camera.id == camera_id for camera in self.cameras)
 
         def start(self) -> None:
             pass
@@ -220,7 +257,7 @@ def test_hailo_provider_batches_monitors_on_one_camera(monkeypatch) -> None:
         def has_exited(self) -> bool:
             return False
 
-        def latest_frame(self) -> HailoDetectionFrame:
+        def latest_frame(self, _camera_id: str) -> HailoDetectionFrame:
             nonlocal latest_frame_calls
             latest_frame_calls += 1
             return HailoDetectionFrame(
@@ -231,7 +268,7 @@ def test_hailo_provider_batches_monitors_on_one_camera(monkeypatch) -> None:
                 debug_jpeg=b"debug",
             )
 
-    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoMultiCameraSession", FakeSession)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     person = MonitorConfig("mon-person", "Person", "object_detector", "cam-1", config={"class_name": "person"})
     backpack = MonitorConfig("mon-backpack", "Backpack", "object_detector", "cam-1", config={"class_name": "backpack"})
@@ -245,39 +282,49 @@ def test_hailo_provider_batches_monitors_on_one_camera(monkeypatch) -> None:
     assert results["mon-person"].debug_jpeg == b"debug"
 
 
-def test_hailo_provider_runs_only_one_camera_session_at_a_time(monkeypatch) -> None:
-    stopped: list[str] = []
-    created: list[str] = []
+def test_hailo_provider_runs_one_multicamera_session(monkeypatch) -> None:
+    stopped: list[list[str]] = []
+    created: list[list[str]] = []
 
     class FakeSession:
-        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
-            self.camera = camera
+        def __init__(self, cameras: list[CameraConfig], fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.cameras = cameras
+            self.fingerprint = fingerprint
+            self.camera_fingerprints = set(fingerprint)
             self.telemetry_enabled = telemetry_enabled
-            created.append(camera.id)
+            created.append([camera.id for camera in cameras])
+
+        def has_camera(self, camera_id: str) -> bool:
+            return any(camera.id == camera_id for camera in self.cameras)
 
         def start(self) -> None:
             pass
 
         def stop(self) -> None:
-            stopped.append(self.camera.id)
+            stopped.append([camera.id for camera in self.cameras])
 
         def has_exited(self) -> bool:
             return False
 
-        def latest_frame(self) -> HailoDetectionFrame:
+        def latest_frame(self, _camera_id: str) -> HailoDetectionFrame:
             return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
 
-    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoMultiCameraSession", FakeSession)
     first_camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     second_camera = CameraConfig("cam-2", "Exit", "192.168.1.51", 554, "/live")
-    monitor = MonitorConfig("mon-1", "Person", "object_detector", "cam-1", config={"class_name": "person"})
+    first_monitor = MonitorConfig("mon-1", "Person", "object_detector", "cam-1", config={"class_name": "person"})
+    second_monitor = MonitorConfig("mon-2", "Person", "object_detector", "cam-2", config={"class_name": "person"})
     provider = HailoGStreamerProvider()
 
-    provider.results_for_camera([monitor], first_camera)
-    provider.results_for_camera([monitor], second_camera)
+    provider.prune_sessions(
+        [first_monitor, second_monitor],
+        {first_camera.id: first_camera, second_camera.id: second_camera},
+    )
+    provider.results_for_camera([first_monitor], first_camera)
+    provider.results_for_camera([second_monitor], second_camera)
 
-    assert created == ["cam-1", "cam-2"]
-    assert stopped == ["cam-1"]
+    assert created == [["cam-1", "cam-2"]]
+    assert stopped == []
     assert provider.telemetry_status()["sessionCount"] == 1
 
 
@@ -325,9 +372,15 @@ def test_hailo_provider_restarts_sessions_when_telemetry_changes(monkeypatch) ->
     telemetry_values: list[bool] = []
 
     class FakeSession:
-        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+        def __init__(self, cameras: list[CameraConfig], fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.cameras = cameras
+            self.fingerprint = fingerprint
+            self.camera_fingerprints = set(fingerprint)
             self.telemetry_enabled = telemetry_enabled
             telemetry_values.append(telemetry_enabled)
+
+        def has_camera(self, camera_id: str) -> bool:
+            return any(camera.id == camera_id for camera in self.cameras)
 
         def start(self) -> None:
             pass
@@ -338,10 +391,10 @@ def test_hailo_provider_restarts_sessions_when_telemetry_changes(monkeypatch) ->
         def has_exited(self) -> bool:
             return False
 
-        def latest_frame(self) -> HailoDetectionFrame:
+        def latest_frame(self, _camera_id: str) -> HailoDetectionFrame:
             return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
 
-    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoMultiCameraSession", FakeSession)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     monitor = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1", config={"confidence_threshold": 0.9})
     provider = HailoGStreamerProvider()
@@ -360,9 +413,15 @@ def test_hailo_provider_disables_telemetry_after_monitored_crash(monkeypatch) ->
     stopped: list[bool] = []
 
     class FakeSession:
-        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+        def __init__(self, cameras: list[CameraConfig], fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.cameras = cameras
+            self.fingerprint = fingerprint
+            self.camera_fingerprints = set(fingerprint)
             self.telemetry_enabled = telemetry_enabled
             telemetry_values.append(telemetry_enabled)
+
+        def has_camera(self, camera_id: str) -> bool:
+            return any(camera.id == camera_id for camera in self.cameras)
 
         def start(self) -> None:
             pass
@@ -379,10 +438,10 @@ def test_hailo_provider_disables_telemetry_after_monitored_crash(monkeypatch) ->
         def exit_error(self) -> str:
             return "Hailo pipeline process exited with SIGSEGV."
 
-        def latest_frame(self) -> HailoDetectionFrame:
+        def latest_frame(self, _camera_id: str) -> HailoDetectionFrame:
             return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
 
-    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoMultiCameraSession", FakeSession)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     monitor = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1", config={"confidence_threshold": 0.9})
     provider = HailoGStreamerProvider()
@@ -403,9 +462,15 @@ def test_hailo_provider_does_not_enable_session_telemetry_by_default(monkeypatch
     telemetry_values: list[bool] = []
 
     class FakeSession:
-        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+        def __init__(self, cameras: list[CameraConfig], fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.cameras = cameras
+            self.fingerprint = fingerprint
+            self.camera_fingerprints = set(fingerprint)
             self.telemetry_enabled = telemetry_enabled
             telemetry_values.append(telemetry_enabled)
+
+        def has_camera(self, camera_id: str) -> bool:
+            return any(camera.id == camera_id for camera in self.cameras)
 
         def start(self) -> None:
             pass
@@ -416,11 +481,11 @@ def test_hailo_provider_does_not_enable_session_telemetry_by_default(monkeypatch
         def has_exited(self) -> bool:
             return False
 
-        def latest_frame(self) -> HailoDetectionFrame:
+        def latest_frame(self, _camera_id: str) -> HailoDetectionFrame:
             return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
 
     monkeypatch.delenv("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", raising=False)
-    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoMultiCameraSession", FakeSession)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     monitor = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1", config={"confidence_threshold": 0.9})
     provider = HailoGStreamerProvider()
@@ -441,17 +506,22 @@ def test_hailo_provider_stops_stuck_first_frame_session(monkeypatch) -> None:
     class FakeSession:
         restart_backoff_seconds = 5.0
 
-        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
-            self.camera = camera
+        def __init__(self, cameras: list[CameraConfig], fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.cameras = cameras
+            self.fingerprint = fingerprint
+            self.camera_fingerprints = set(fingerprint)
             self.telemetry_enabled = telemetry_enabled
             self.read_attempts = 0
-            created.append(camera.id)
+            created.append(cameras[0].id)
+
+        def has_camera(self, camera_id: str) -> bool:
+            return any(camera.id == camera_id for camera in self.cameras)
 
         def start(self) -> None:
             pass
 
         def stop(self) -> None:
-            stopped.append(self.camera.id)
+            stopped.append(self.cameras[0].id)
 
         def has_exited(self) -> bool:
             return False
@@ -462,11 +532,11 @@ def test_hailo_provider_stops_stuck_first_frame_session(monkeypatch) -> None:
         def first_frame_timeout_error(self) -> str:
             return "No Hailo frame received after 10s from the RTSP pipeline."
 
-        def latest_frame(self) -> HailoDetectionFrame:
+        def latest_frame(self, _camera_id: str) -> HailoDetectionFrame:
             self.read_attempts += 1
             raise RuntimeError("Waiting for first Hailo frame from the RTSP pipeline (0s).")
 
-    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoMultiCameraSession", FakeSession)
     camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
     monitor = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1")
     provider = HailoGStreamerProvider()
