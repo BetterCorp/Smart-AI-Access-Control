@@ -320,11 +320,13 @@ def test_hailo_session_stop_escalates_and_closes_queue() -> None:
 
 
 def test_hailo_provider_restarts_sessions_when_telemetry_changes(monkeypatch) -> None:
+    monkeypatch.setenv("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", "1")
     stopped: list[bool] = []
     telemetry_values: list[bool] = []
 
     class FakeSession:
         def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.telemetry_enabled = telemetry_enabled
             telemetry_values.append(telemetry_enabled)
 
         def start(self) -> None:
@@ -353,6 +355,7 @@ def test_hailo_provider_restarts_sessions_when_telemetry_changes(monkeypatch) ->
 
 
 def test_hailo_provider_disables_telemetry_after_monitored_crash(monkeypatch) -> None:
+    monkeypatch.setenv("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", "1")
     telemetry_values: list[bool] = []
     stopped: list[bool] = []
 
@@ -394,3 +397,85 @@ def test_hailo_provider_disables_telemetry_after_monitored_crash(monkeypatch) ->
     assert provider.telemetry_status()["telemetrySessionCount"] == 0
     assert "SIGSEGV" in str(provider.telemetry_status()["error"])
     assert result.observations[0].value == 1
+
+
+def test_hailo_provider_does_not_enable_session_telemetry_by_default(monkeypatch) -> None:
+    telemetry_values: list[bool] = []
+
+    class FakeSession:
+        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.telemetry_enabled = telemetry_enabled
+            telemetry_values.append(telemetry_enabled)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def has_exited(self) -> bool:
+            return False
+
+        def latest_frame(self) -> HailoDetectionFrame:
+            return HailoDetectionFrame([Detection("person", 0.9, (0.1, 0.1, 0.2, 0.5))])
+
+    monkeypatch.delenv("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", raising=False)
+    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    monitor = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1", config={"confidence_threshold": 0.9})
+    provider = HailoGStreamerProvider()
+
+    provider.set_telemetry_enabled(True)
+    provider.result_for(monitor, camera)
+
+    assert telemetry_values == [False]
+    assert provider.telemetry_status()["enabled"] is False
+    assert provider.telemetry_status()["telemetrySessionCount"] == 0
+    assert "disabled" in str(provider.telemetry_status()["error"])
+
+
+def test_hailo_provider_stops_stuck_first_frame_session(monkeypatch) -> None:
+    stopped: list[str] = []
+    created: list[str] = []
+
+    class FakeSession:
+        restart_backoff_seconds = 5.0
+
+        def __init__(self, camera: CameraConfig, fingerprint: tuple[object, ...], *, telemetry_enabled: bool = False) -> None:
+            self.camera = camera
+            self.telemetry_enabled = telemetry_enabled
+            self.read_attempts = 0
+            created.append(camera.id)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            stopped.append(self.camera.id)
+
+        def has_exited(self) -> bool:
+            return False
+
+        def first_frame_timed_out(self) -> bool:
+            return self.read_attempts > 0
+
+        def first_frame_timeout_error(self) -> str:
+            return "No Hailo frame received after 10s from the RTSP pipeline."
+
+        def latest_frame(self) -> HailoDetectionFrame:
+            self.read_attempts += 1
+            raise RuntimeError("Waiting for first Hailo frame from the RTSP pipeline (0s).")
+
+    monkeypatch.setattr("backend.app.inference.hailo.HailoCameraSession", FakeSession)
+    camera = CameraConfig("cam-1", "Entrance", "192.168.1.50", 554, "/live")
+    monitor = MonitorConfig("mon-1", "Strict", "object_detector", "cam-1")
+    provider = HailoGStreamerProvider()
+
+    with pytest.raises(RuntimeError, match="Waiting for first Hailo frame"):
+        provider.result_for(monitor, camera)
+    with pytest.raises(RuntimeError, match="stopped to release the device"):
+        provider.result_for(monitor, camera)
+
+    assert created == ["cam-1"]
+    assert stopped == ["cam-1"]
+    assert provider.telemetry_status()["sessionCount"] == 0

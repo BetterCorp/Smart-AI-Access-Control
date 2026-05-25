@@ -29,6 +29,7 @@ from backend.app.domain import (
     SnapshotDelivery,
     WebhookAction,
 )
+from backend.app.health import camera_row_is_fault
 from backend.app.models import MODEL_DEFINITIONS, model_options, monitor_templates
 from backend.app.plugins.object_count import ObjectCountPlugin
 from backend.app.system_metrics import performance_snapshot
@@ -802,7 +803,7 @@ def update_storage(
 def health() -> dict[str, object]:
     worker_status = repo.get_worker_status()
     camera_rows = repo.list_camera_rows()
-    camera_faults = [row for row in camera_rows if row["health"] in {"stream_error", "auth_failed"}]
+    camera_faults = [row for row in camera_rows if camera_row_is_fault(row)]
     return {
         "ok": worker_status is not None and not camera_faults,
         "cameras": len(camera_rows),
@@ -838,11 +839,18 @@ def health() -> dict[str, object]:
 def performance() -> dict[str, object]:
     worker_status = repo.get_worker_status()
     real_inference_active = bool(worker_status and worker_status["inference_mode"] == "real")
-    reason = None if real_inference_active else "real inference not active"
+    session_monitor_enabled = os.environ.get("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", "0") == "1"
+    telemetry_allowed = real_inference_active and session_monitor_enabled
+    if not real_inference_active:
+        reason = "real inference not active"
+    elif not session_monitor_enabled:
+        reason = "Hailo session monitor disabled for pipeline stability"
+    else:
+        reason = None
     return performance_snapshot(
         settings.data_dir,
         activate_hailo_telemetry=True,
-        hailo_telemetry_allowed=real_inference_active,
+        hailo_telemetry_allowed=telemetry_allowed,
         hailo_telemetry_disabled_reason=reason,
     )
 

@@ -92,7 +92,7 @@ Deployment is split into two scripts:
 - install systemd services,
 - install an hourly `smartai-cleanup.timer` to prune snapshots and app-owned old logs,
 - serve the web API with two Uvicorn worker processes,
-- enable HailoRT monitor telemetry for the worker at a conservative 5-second interval,
+- install HailoRT monitor support but keep session-level monitor mode disabled by default for pipeline stability,
 - install an aggressive Raspberry Pi 5 fan curve in `/boot/firmware/config.txt`,
 - install the USB relay udev rule,
 - expose the app directly on `0.0.0.0:8000`,
@@ -140,6 +140,7 @@ sudo env \
   SMARTAI_ENABLE_RELAY_HARDWARE=0 \
   SMARTAI_ENABLE_HAILO_PACKAGES=1 \
   SMARTAI_ENABLE_HAILO_MONITOR=1 \
+  SMARTAI_ENABLE_HAILO_SESSION_MONITOR=0 \
   SMARTAI_HAILO_MONITOR_INTERVAL_MS=5000 \
   SMARTAI_ENABLE_PI_FAN_TUNING=1 \
   SMARTAI_LOG_RETENTION_DAYS=7 \
@@ -153,7 +154,7 @@ Cleanup runs hourly through `smartai-cleanup.timer`. It applies the configured s
 
 Fan tuning writes a marked Smart AI Access Control block to `/boot/firmware/config.txt` and replaces only that block on future runs. Disable it with `SMARTAI_ENABLE_PI_FAN_TUNING=0`. The default curve starts cooling earlier than Raspberry Pi OS defaults: 40C at 50% PWM, 50C at 75% PWM, 60C at 88% PWM, and 70C at 100% PWM. A reboot is required for boot config changes to take effect.
 
-Hailo monitor telemetry is available when `SMARTAI_ENABLE_HAILO_MONITOR=1`, but Hailo child pipelines start with `HAILO_MONITOR=0` until a telemetry client asks for data. The dashboard performance panel is the telemetry client: it polls every 5 seconds while open, records a 30-minute telemetry demand window, and the worker restarts Hailo camera sessions with `HAILO_MONITOR=1` only during that window. After the window expires, the worker restarts sessions without monitor mode. The dashboard shows parsed utilization/FPS when `hailortcli monitor` reports active data, plus the raw monitor sample for troubleshooting. Disable HailoRT monitor support with `SMARTAI_ENABLE_HAILO_MONITOR=0` or change the HailoRT interval with `SMARTAI_HAILO_MONITOR_INTERVAL_MS`.
+Hailo monitor telemetry is available only when both `SMARTAI_ENABLE_HAILO_MONITOR=1` and `SMARTAI_ENABLE_HAILO_SESSION_MONITOR=1` are set. Session-level HailoRT monitor mode is disabled by default because it can keep the Hailo device busy during pipeline startup on the Raspberry Pi AI HAT+. The dashboard still shows PCIe/device/driver checks with monitor mode disabled. Enable session monitor mode only while troubleshooting utilization/FPS, then disable it again if camera startup becomes unreliable.
 
 After setup:
 

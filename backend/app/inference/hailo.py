@@ -34,10 +34,13 @@ class HailoGStreamerProvider:
 
     def __init__(self) -> None:
         self._sessions: dict[tuple[object, ...], HailoCameraSession] = {}
+        self._restart_after: dict[tuple[object, ...], float] = {}
         self._active_fingerprint: tuple[object, ...] | None = None
         self._lock = threading.Lock()
+        self._telemetry_requested = False
         self._telemetry_enabled = False
         self._telemetry_error: str | None = None
+        self._session_telemetry_allowed = os.environ.get("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", "0") == "1"
 
     def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
         return self.results_for_camera([monitor], camera)[monitor.id]
@@ -67,6 +70,7 @@ class HailoGStreamerProvider:
             self._activate_fingerprint(fingerprint)
             session = self._sessions.get(fingerprint)
             if session is None:
+                self._raise_if_restart_backoff_active(fingerprint)
                 session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
                 self._sessions[fingerprint] = session
                 session.start()
@@ -85,8 +89,24 @@ class HailoGStreamerProvider:
                     session = HailoCameraSession(camera, fingerprint, telemetry_enabled=self._telemetry_enabled)
                     self._sessions[fingerprint] = session
                     session.start()
+            elif session_first_frame_timed_out(session):
+                error = session.first_frame_timeout_error()
+                session.stop()
+                self._sessions.pop(fingerprint, None)
+                self._restart_after[fingerprint] = time.monotonic() + HailoCameraSession.restart_backoff_seconds
+                raise RuntimeError(f"{error} Hailo session was stopped to release the device.")
 
         return session.latest_frame()
+
+    def _raise_if_restart_backoff_active(self, fingerprint: tuple[object, ...]) -> None:
+        restart_after = self._restart_after.get(fingerprint)
+        if restart_after is None:
+            return
+        now = time.monotonic()
+        if now < restart_after:
+            remaining = max(restart_after - now, 0.0)
+            raise RuntimeError(f"Waiting for first Hailo frame restart backoff ({remaining:.0f}s).")
+        self._restart_after.pop(fingerprint, None)
 
     def _activate_fingerprint(self, fingerprint: tuple[object, ...]) -> None:
         if self._active_fingerprint == fingerprint:
@@ -95,6 +115,7 @@ class HailoGStreamerProvider:
             if key != fingerprint:
                 session.stop()
                 self._sessions.pop(key, None)
+                self._restart_after.pop(key, None)
         self._active_fingerprint = fingerprint
 
     def prune_sessions(self, monitors: list[MonitorConfig], cameras: dict[str, CameraConfig]) -> None:
@@ -108,6 +129,8 @@ class HailoGStreamerProvider:
         with self._lock:
             unused_keys = [key for key in self._sessions if key not in active]
             sessions = [self._sessions.pop(key) for key in unused_keys]
+            for key in unused_keys:
+                self._restart_after.pop(key, None)
             if self._active_fingerprint not in self._sessions:
                 self._active_fingerprint = None
         for session in sessions:
@@ -127,12 +150,21 @@ class HailoGStreamerProvider:
         with self._lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()
+            self._restart_after.clear()
             self._active_fingerprint = None
         for session in sessions:
             session.stop()
 
     def set_telemetry_enabled(self, enabled: bool) -> None:
         with self._lock:
+            self._telemetry_requested = enabled
+            if enabled and not self._session_telemetry_allowed:
+                self._telemetry_enabled = False
+                self._telemetry_error = "Hailo session telemetry disabled for pipeline stability."
+                return
+            if not enabled and not self._session_telemetry_allowed:
+                self._telemetry_error = None
+                return
             if enabled and self._telemetry_error:
                 return
             if enabled == self._telemetry_enabled:
@@ -140,6 +172,7 @@ class HailoGStreamerProvider:
             self._telemetry_enabled = enabled
             sessions = list(self._sessions.values())
             self._sessions.clear()
+            self._restart_after.clear()
             self._active_fingerprint = None
         for session in sessions:
             session.stop()
@@ -148,6 +181,7 @@ class HailoGStreamerProvider:
         with self._lock:
             sessions = list(self._sessions.values())
             return {
+                "requested": self._telemetry_requested,
                 "enabled": self._telemetry_enabled,
                 "sessionCount": len(sessions),
                 "telemetrySessionCount": sum(1 for session in sessions if session.telemetry_enabled),
@@ -156,6 +190,7 @@ class HailoGStreamerProvider:
 
 
 class HailoCameraSession:
+    first_frame_timeout_seconds = 10.0
     restart_backoff_seconds = 5.0
 
     def __init__(
@@ -228,6 +263,23 @@ class HailoCameraSession:
         with self._lock:
             return self._restart_after is not None and time.monotonic() >= self._restart_after
 
+    def first_frame_timed_out(self) -> bool:
+        with self._lock:
+            if self._latest_frame is not None or self._latest_error is not None:
+                return False
+            process = self._process
+            if process is None or process.exitcode is not None:
+                return False
+            return self.first_frame_wait_seconds() >= self.first_frame_timeout_seconds
+
+    def first_frame_wait_seconds(self) -> float:
+        return time.monotonic() - self._started_at
+
+    def first_frame_timeout_error(self) -> str:
+        bus_message = self._latest_bus_message
+        detail = f" Latest pipeline message: {bus_message}" if bus_message else ""
+        return f"No Hailo frame received after {self.first_frame_wait_seconds():.0f}s from the RTSP pipeline.{detail}"
+
     def exit_error(self) -> str:
         process = self._process
         if process is None or process.exitcode is None:
@@ -244,13 +296,11 @@ class HailoCameraSession:
             process = self._process
             if process is not None and process.exitcode is not None:
                 raise RuntimeError(format_child_exit(process.exitcode))
-            waited = time.monotonic() - self._started_at
+            waited = self.first_frame_wait_seconds()
             bus_message = self._latest_bus_message
         detail = f" Latest pipeline message: {bus_message}" if bus_message else ""
-        if waited >= 10:
-            raise RuntimeError(
-                f"No Hailo frame received after {waited:.0f}s from the RTSP pipeline.{detail}"
-            )
+        if waited >= self.first_frame_timeout_seconds:
+            raise RuntimeError(f"No Hailo frame received after {waited:.0f}s from the RTSP pipeline.{detail}")
         raise RuntimeError(f"Waiting for first Hailo frame from the RTSP pipeline ({waited:.0f}s).{detail}")
 
     def _drain_messages(self) -> None:
@@ -420,6 +470,11 @@ def restore_env(key: str, value: str | None) -> None:
         os.environ.pop(key, None)
     else:
         os.environ[key] = value
+
+
+def session_first_frame_timed_out(session: Any) -> bool:
+    first_frame_timed_out = getattr(session, "first_frame_timed_out", None)
+    return bool(first_frame_timed_out()) if callable(first_frame_timed_out) else False
 
 
 def format_child_exit(exitcode: int) -> str:

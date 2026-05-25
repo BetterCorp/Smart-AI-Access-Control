@@ -3,6 +3,7 @@ from pathlib import Path
 from backend.app.db import Database, Repository
 from backend.app.domain import CameraConfig, ConditionGroup, InferenceResult, MonitorConfig, Observation, RelayAction, RelayDesiredState, RuleCondition, RuleConfig
 from backend.app.storage.snapshots import SnapshotStore, StorageConfig
+from backend.app.system_metrics import mark_hailo_telemetry_active
 from backend.app.worker import MockInferenceProvider, Worker
 
 
@@ -302,6 +303,38 @@ def test_worker_closes_inference_on_shutdown(tmp_path) -> None:
         pass
 
     assert inference.closed is True
+
+
+def test_worker_does_not_enable_hailo_session_monitor_by_default(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SMARTAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SMARTAI_ENABLE_HAILO_MONITOR", "1")
+    monkeypatch.delenv("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", raising=False)
+    mark_hailo_telemetry_active(tmp_path)
+
+    class TelemetryInferenceProvider:
+        def __init__(self) -> None:
+            self.enabled_values: list[bool] = []
+
+        def set_telemetry_enabled(self, enabled: bool) -> None:
+            self.enabled_values.append(enabled)
+
+        def telemetry_status(self) -> dict[str, object]:
+            return {"enabled": self.enabled_values[-1] if self.enabled_values else False}
+
+        def result_for(self, monitor: MonitorConfig, camera: CameraConfig) -> InferenceResult:
+            return InferenceResult([])
+
+    repo = Repository(Database(tmp_path / "smartai.db"))
+    inference = TelemetryInferenceProvider()
+    worker = Worker(
+        repo,
+        SnapshotStore(StorageConfig(tmp_path / "snapshots", max_bytes=1024 * 1024, min_free_disk_percent=0)),
+        inference,
+    )
+
+    worker.process_once()
+
+    assert inference.enabled_values == [False]
 
 
 class FailingRelayDriver:

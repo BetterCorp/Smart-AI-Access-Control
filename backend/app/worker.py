@@ -229,7 +229,12 @@ class Worker:
         if not callable(set_telemetry_enabled):
             return {}
         monitor_support_enabled = os.environ.get("SMARTAI_ENABLE_HAILO_MONITOR", "1") == "1"
-        telemetry_enabled = monitor_support_enabled and hailo_telemetry_is_active(load_settings().data_dir)
+        session_monitor_enabled = os.environ.get("SMARTAI_ENABLE_HAILO_SESSION_MONITOR", "0") == "1"
+        telemetry_enabled = (
+            monitor_support_enabled
+            and session_monitor_enabled
+            and hailo_telemetry_is_active(load_settings().data_dir)
+        )
         if telemetry_enabled != self._hailo_telemetry_enabled:
             set_telemetry_enabled(telemetry_enabled)
             self._hailo_telemetry_enabled = telemetry_enabled

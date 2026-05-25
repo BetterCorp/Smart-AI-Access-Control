@@ -8,6 +8,7 @@ ENABLE_RELAY_HARDWARE="${SMARTAI_ENABLE_RELAY_HARDWARE:-0}"
 ENABLE_HAILO_PACKAGES="${SMARTAI_ENABLE_HAILO_PACKAGES:-1}"
 HAILO_APPS_REF="${SMARTAI_HAILO_APPS_REF:-main}"
 ENABLE_HAILO_MONITOR="${SMARTAI_ENABLE_HAILO_MONITOR:-1}"
+ENABLE_HAILO_SESSION_MONITOR="${SMARTAI_ENABLE_HAILO_SESSION_MONITOR:-0}"
 HAILO_MONITOR_INTERVAL_MS="${SMARTAI_HAILO_MONITOR_INTERVAL_MS:-5000}"
 ENABLE_PI_FAN_TUNING="${SMARTAI_ENABLE_PI_FAN_TUNING:-1}"
 ENABLE_UFW="${SMARTAI_ENABLE_UFW:-1}"
@@ -189,12 +190,22 @@ install_systemd() {
   install -m 0644 "${APP_DIR}/deploy/systemd/smartai-cleanup.service" /etc/systemd/system/smartai-cleanup.service
   install -m 0644 "${APP_DIR}/deploy/systemd/smartai-cleanup.timer" /etc/systemd/system/smartai-cleanup.timer
 
+  mkdir -p /etc/systemd/system/smartai-api.service.d
+  cat >/etc/systemd/system/smartai-api.service.d/override.conf <<EOF
+[Service]
+Environment=SMARTAI_DATA_DIR=${DATA_DIR}
+Environment=SMARTAI_DB=${DATA_DIR}/smartai.db
+Environment=SMARTAI_SNAPSHOT_ROOT=${DATA_DIR}/snapshots
+Environment=SMARTAI_ENABLE_HAILO_SESSION_MONITOR=${ENABLE_HAILO_SESSION_MONITOR}
+EOF
+
   mkdir -p /etc/systemd/system/smartai-worker.service.d
   cat >/etc/systemd/system/smartai-worker.service.d/override.conf <<EOF
 [Service]
 Environment=SMARTAI_MOCK_INFERENCE=${MOCK_INFERENCE}
 Environment=SMARTAI_ENABLE_RELAY_HARDWARE=${ENABLE_RELAY_HARDWARE}
 Environment=SMARTAI_ENABLE_HAILO_MONITOR=${ENABLE_HAILO_MONITOR}
+Environment=SMARTAI_ENABLE_HAILO_SESSION_MONITOR=${ENABLE_HAILO_SESSION_MONITOR}
 Environment=HAILO_MONITOR=0
 Environment=HAILO_MONITOR_TIME_INTERVAL=${HAILO_MONITOR_INTERVAL_MS}
 Environment=HAILORT_LOGGER_PATH=${DATA_DIR}
