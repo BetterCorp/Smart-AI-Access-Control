@@ -12,6 +12,7 @@ ENABLE_HAILO_SESSION_MONITOR="${SMARTAI_ENABLE_HAILO_SESSION_MONITOR:-0}"
 HAILO_MONITOR_INTERVAL_MS="${SMARTAI_HAILO_MONITOR_INTERVAL_MS:-5000}"
 ENABLE_PI_FAN_TUNING="${SMARTAI_ENABLE_PI_FAN_TUNING:-1}"
 ENABLE_UFW="${SMARTAI_ENABLE_UFW:-1}"
+TIMEZONE="${SMARTAI_TIMEZONE:-}"
 SERVICE_USER="${SMARTAI_SERVICE_USER:-smartai}"
 SERVICE_GROUP="${SMARTAI_SERVICE_GROUP:-smartai}"
 
@@ -175,6 +176,30 @@ EOF
   rm -f "${tmp}"
 }
 
+configure_timezone() {
+  if [[ -z "${TIMEZONE}" ]]; then
+    return
+  fi
+
+  if [[ "${TIMEZONE}" == /* || "${TIMEZONE}" == *..* ]]; then
+    echo "Timezone '${TIMEZONE}' must be a zoneinfo name like Africa/Johannesburg" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "/usr/share/zoneinfo/${TIMEZONE}" ]]; then
+    echo "Timezone '${TIMEZONE}' was not found under /usr/share/zoneinfo" >&2
+    exit 1
+  fi
+
+  log "Configuring OS timezone ${TIMEZONE}"
+  if command -v timedatectl >/dev/null 2>&1; then
+    timedatectl set-timezone "${TIMEZONE}"
+  else
+    ln -sfn "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+    printf '%s\n' "${TIMEZONE}" >/etc/timezone
+  fi
+}
+
 install_node_assets() {
   log "Building TypeScript assets"
   require_command npm
@@ -198,10 +223,18 @@ Environment=SMARTAI_DB=${DATA_DIR}/smartai.db
 Environment=SMARTAI_SNAPSHOT_ROOT=${DATA_DIR}/snapshots
 Environment=SMARTAI_ENABLE_HAILO_SESSION_MONITOR=${ENABLE_HAILO_SESSION_MONITOR}
 EOF
+  if [[ -n "${TIMEZONE}" ]]; then
+    cat >>/etc/systemd/system/smartai-api.service.d/override.conf <<EOF
+Environment=SMARTAI_TIMEZONE=${TIMEZONE}
+EOF
+  fi
 
   mkdir -p /etc/systemd/system/smartai-worker.service.d
   cat >/etc/systemd/system/smartai-worker.service.d/override.conf <<EOF
 [Service]
+Environment=SMARTAI_DATA_DIR=${DATA_DIR}
+Environment=SMARTAI_DB=${DATA_DIR}/smartai.db
+Environment=SMARTAI_SNAPSHOT_ROOT=${DATA_DIR}/snapshots
 Environment=SMARTAI_MOCK_INFERENCE=${MOCK_INFERENCE}
 Environment=SMARTAI_ENABLE_RELAY_HARDWARE=${ENABLE_RELAY_HARDWARE}
 Environment=SMARTAI_ENABLE_HAILO_MONITOR=${ENABLE_HAILO_MONITOR}
@@ -210,6 +243,11 @@ Environment=HAILO_MONITOR=0
 Environment=HAILO_MONITOR_TIME_INTERVAL=${HAILO_MONITOR_INTERVAL_MS}
 Environment=HAILORT_LOGGER_PATH=${DATA_DIR}
 EOF
+  if [[ -n "${TIMEZONE}" ]]; then
+    cat >>/etc/systemd/system/smartai-worker.service.d/override.conf <<EOF
+Environment=SMARTAI_TIMEZONE=${TIMEZONE}
+EOF
+  fi
 
   mkdir -p /etc/systemd/system/smartai-cleanup.service.d
   cat >/etc/systemd/system/smartai-cleanup.service.d/override.conf <<EOF
@@ -221,6 +259,11 @@ Environment=SMARTAI_LOG_RETENTION_DAYS=${SMARTAI_LOG_RETENTION_DAYS:-7}
 Environment=SMARTAI_LOG_MAX_BYTES=${SMARTAI_LOG_MAX_BYTES:-52428800}
 Environment=SMARTAI_CLEANUP_SNAPSHOT_BATCH_SIZE=${SMARTAI_CLEANUP_SNAPSHOT_BATCH_SIZE:-500}
 EOF
+  if [[ -n "${TIMEZONE}" ]]; then
+    cat >>/etc/systemd/system/smartai-cleanup.service.d/override.conf <<EOF
+Environment=SMARTAI_TIMEZONE=${TIMEZONE}
+EOF
+  fi
 
   systemctl daemon-reload
   systemctl enable smartai-api.service smartai-worker.service smartai-cleanup.timer
@@ -265,6 +308,7 @@ main() {
   ensure_user_and_dirs
   install_python_app
   verify_hailo_python
+  configure_timezone
   configure_pi_fan
   install_node_assets
   install_udev

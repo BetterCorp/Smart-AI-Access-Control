@@ -143,6 +143,7 @@ sudo env \
   SMARTAI_ENABLE_HAILO_SESSION_MONITOR=0 \
   SMARTAI_HAILO_MONITOR_INTERVAL_MS=5000 \
   SMARTAI_ENABLE_PI_FAN_TUNING=1 \
+  SMARTAI_TIMEZONE=Africa/Johannesburg \
   SMARTAI_LOG_RETENTION_DAYS=7 \
   SMARTAI_LOG_MAX_BYTES=52428800 \
   SMARTAI_HAILO_APPS_REF=main \
@@ -153,6 +154,8 @@ sudo env \
 Cleanup runs hourly through `smartai-cleanup.timer`. It applies the configured snapshot storage limits, including monitor debug snapshots under `snapshots/monitor-debug`, and removes app-owned `*.log` / rotated `.log.*` files under `/var/lib/smartai` by age and total size.
 
 Fan tuning writes a marked Smart AI Access Control block to `/boot/firmware/config.txt` and replaces only that block on future runs. Disable it with `SMARTAI_ENABLE_PI_FAN_TUNING=0`. The default curve starts cooling earlier than Raspberry Pi OS defaults: 40C at 50% PWM, 50C at 75% PWM, 60C at 88% PWM, and 70C at 100% PWM. A reboot is required for boot config changes to take effect.
+
+Timezone setup is opt-in. If `SMARTAI_TIMEZONE` is set when running setup, the script validates `/usr/share/zoneinfo/<timezone>`, configures the OS timezone, and passes the same value to the API, worker, and cleanup services. If it is not set, setup leaves the OS timezone and service timezone environment unchanged.
 
 Hailo monitor telemetry is available only when both `SMARTAI_ENABLE_HAILO_MONITOR=1` and `SMARTAI_ENABLE_HAILO_SESSION_MONITOR=1` are set. Session-level HailoRT monitor mode is disabled by default because it can keep the Hailo device busy during pipeline startup on the Raspberry Pi AI HAT+. The dashboard still shows PCIe/device/driver checks with monitor mode disabled. Enable session monitor mode only while troubleshooting utilization/FPS, then disable it again if camera startup becomes unreliable.
 
