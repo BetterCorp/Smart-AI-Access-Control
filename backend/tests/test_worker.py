@@ -249,6 +249,7 @@ def test_worker_records_waiting_monitor_runtime(tmp_path) -> None:
     rows = repo.list_monitor_runtime_rows()
     assert rows[0]["status"] == "waiting"
     assert rows[0]["last_error"].startswith("Waiting for first Hailo frame")
+    assert repo.list_camera_rows()[0]["health"] == "waiting"
 
 
 def test_worker_reuses_camera_error_for_same_cycle(tmp_path) -> None:
@@ -270,6 +271,7 @@ def test_worker_reuses_camera_error_for_same_cycle(tmp_path) -> None:
     assert inference.calls == 1
     assert {row["status"] for row in rows} == {"waiting"}
     assert all(row["last_error"].startswith("Waiting for first Hailo frame") for row in rows)
+    assert repo.list_camera_rows()[0]["health"] == "waiting"
 
 
 def test_worker_closes_inference_on_shutdown(tmp_path) -> None:

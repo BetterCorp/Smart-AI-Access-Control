@@ -138,11 +138,13 @@ def hailo_metrics(
     pci = run_command(["lspci", "-nn"], timeout_seconds=2.0)
     identify = run_command(["hailortcli", "fw-control", "identify"], timeout_seconds=3.0)
     scan = run_command(["hailortcli", "scan"], timeout_seconds=3.0)
+    monitor_cwd = prepare_hailo_monitor_cwd(storage_path)
     monitor = (
         run_command(
             ["hailortcli", "monitor"],
             timeout_seconds=2.0,
-            env={**os.environ, "HAILO_MONITOR": "1", "TERM": "dumb"},
+            env={**os.environ, "HAILO_MONITOR": "1", "HAILORT_LOGGER_PATH": str(monitor_cwd), "TERM": "dumb"},
+            cwd=monitor_cwd,
         )
         if telemetry_active
         else CommandResult(0)
@@ -181,6 +183,14 @@ def hailo_metrics(
     return metrics
 
 
+def prepare_hailo_monitor_cwd(storage_path: Path) -> Path:
+    try:
+        storage_path.mkdir(parents=True, exist_ok=True)
+        return storage_path
+    except OSError:
+        return Path.cwd()
+
+
 def disabled_monitor_metrics(reason: str | None) -> dict[str, Any]:
     return {
         "monitorOk": False,
@@ -200,9 +210,21 @@ class CommandResult:
     stderr: str = ""
 
 
-def run_command(command: list[str], timeout_seconds: float, env: dict[str, str] | None = None) -> CommandResult:
+def run_command(
+    command: list[str],
+    timeout_seconds: float,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> CommandResult:
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, env=env)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env=env,
+            cwd=str(cwd) if cwd is not None else None,
+        )
     except FileNotFoundError:
         return CommandResult(127, stderr=f"{command[0]} not found")
     except subprocess.TimeoutExpired as exc:

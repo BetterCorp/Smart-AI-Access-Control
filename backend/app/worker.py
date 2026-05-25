@@ -167,7 +167,7 @@ class Worker:
                     processed_monitors.add(camera_monitor.id)
                     observations_by_monitor[camera_monitor.id] = []
                     self.repo.update_monitor_runtime(camera_monitor.id, status, error)
-                self.repo.set_camera_health(camera.id, "stream_error", error)
+                self.repo.set_camera_health(camera.id, camera_health_for_monitor_status(status), error)
                 continue
             try:
                 results = (
@@ -205,7 +205,7 @@ class Worker:
                     processed_monitors.add(camera_monitor.id)
                     observations_by_monitor[camera_monitor.id] = []
                     self.repo.update_monitor_runtime(camera_monitor.id, status, error)
-                self.repo.set_camera_health(camera.id, "stream_error", error)
+                self.repo.set_camera_health(camera.id, camera_health_for_monitor_status(status), error)
 
         relay_commands: list[RelayCommand] = []
         for rule in self.repo.list_rules():
@@ -356,6 +356,10 @@ def latest_event_for(repo: Repository, rule_id: str, camera_id: str):
         if event["rule_id"] == rule_id and event["camera_id"] == camera_id:
             return event
     return None
+
+
+def camera_health_for_monitor_status(status: str) -> str:
+    return "waiting" if status == "waiting" else "stream_error"
 
 
 def snapshot_ref_from_event(event) -> object:

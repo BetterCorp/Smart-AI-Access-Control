@@ -57,7 +57,7 @@ def test_parse_hailo_monitor_detects_no_files_message() -> None:
 def test_hailo_monitor_probe_is_skipped_when_telemetry_is_idle(monkeypatch, tmp_path) -> None:
     commands: list[list[str]] = []
 
-    def fake_run(command: list[str], timeout_seconds: float, env=None) -> CommandResult:
+    def fake_run(command: list[str], timeout_seconds: float, env=None, cwd=None) -> CommandResult:
         commands.append(command)
         return CommandResult(0, stdout="Device Architecture: HAILO8L\n")
 
@@ -73,10 +73,15 @@ def test_hailo_monitor_probe_is_skipped_when_telemetry_is_idle(monkeypatch, tmp_
 
 def test_hailo_monitor_probe_runs_when_telemetry_is_active(monkeypatch, tmp_path) -> None:
     commands: list[list[str]] = []
+    monitor_env: dict[str, str] = {}
+    monitor_cwd = None
 
-    def fake_run(command: list[str], timeout_seconds: float, env=None) -> CommandResult:
+    def fake_run(command: list[str], timeout_seconds: float, env=None, cwd=None) -> CommandResult:
+        nonlocal monitor_env, monitor_cwd
         commands.append(command)
         if command == ["hailortcli", "monitor"]:
+            monitor_env = dict(env or {})
+            monitor_cwd = cwd
             return CommandResult(124, stdout="Device Utilization 25%\nyolov8s.hef FPS 8\n")
         return CommandResult(0, stdout="Device Architecture: HAILO8L\n")
 
@@ -89,6 +94,8 @@ def test_hailo_monitor_probe_runs_when_telemetry_is_active(monkeypatch, tmp_path
 
     assert metrics["telemetryActive"] is True
     assert ["hailortcli", "monitor"] in commands
+    assert monitor_env["HAILORT_LOGGER_PATH"] == str(tmp_path)
+    assert monitor_cwd == tmp_path
     assert metrics["utilizationPercent"] == 25.0
     assert metrics["fps"] == 8.0
 
@@ -96,7 +103,7 @@ def test_hailo_monitor_probe_runs_when_telemetry_is_active(monkeypatch, tmp_path
 def test_hailo_monitor_probe_is_disabled_when_telemetry_not_allowed(monkeypatch, tmp_path) -> None:
     commands: list[list[str]] = []
 
-    def fake_run(command: list[str], timeout_seconds: float, env=None) -> CommandResult:
+    def fake_run(command: list[str], timeout_seconds: float, env=None, cwd=None) -> CommandResult:
         commands.append(command)
         return CommandResult(0, stdout="Device Architecture: HAILO8L\n")
 
