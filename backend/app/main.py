@@ -29,7 +29,7 @@ from backend.app.domain import (
     SnapshotDelivery,
     WebhookAction,
 )
-from backend.app.health import camera_row_is_fault
+from backend.app.health import camera_display_health, camera_row_is_fault
 from backend.app.models import MODEL_DEFINITIONS, model_options, monitor_templates
 from backend.app.plugins.object_count import ObjectCountPlugin
 from backend.app.system_metrics import performance_snapshot
@@ -320,12 +320,12 @@ def monitor_debug_snapshot_page(request: Request, monitor_id: str) -> HTMLRespon
 
 @app.get("/cameras", response_class=HTMLResponse)
 def cameras_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "pages/cameras.html", {"cameras": repo.list_camera_rows()})
+    return templates.TemplateResponse(request, "pages/cameras.html", {"cameras": camera_view_rows()})
 
 
 @app.get("/ui/cameras/table", response_class=HTMLResponse)
 def cameras_table(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "partials/cameras_table.html", {"cameras": repo.list_camera_rows()})
+    return templates.TemplateResponse(request, "partials/cameras_table.html", {"cameras": camera_view_rows()})
 
 
 @app.post("/ui/cameras", response_class=HTMLResponse)
@@ -833,6 +833,15 @@ def health() -> dict[str, object]:
         "db": str(settings.db_path),
         "pid": os.getpid(),
     }
+
+
+def camera_view_rows() -> list[dict[str, object]]:
+    rows = []
+    for row in repo.list_camera_rows():
+        item = dict(row)
+        item["display_health"] = camera_display_health(row)
+        rows.append(item)
+    return rows
 
 
 @app.get("/api/system/performance")

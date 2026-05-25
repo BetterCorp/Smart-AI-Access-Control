@@ -8,7 +8,7 @@
         <td>{{ camera["name"] }}</td>
         <td>{{ camera["host"] }}:{{ camera["port"] }}</td>
         <td>{{ camera["analytics_fps"] }}</td>
-        <td>{{ camera["health"] }}</td>
+        <td>{{ camera["display_health"] }}</td>
         <td>{{ camera["last_error"] or "" }}</td>
         <td>
           <button hx-post="/ui/cameras/{{ camera['id'] }}/test" hx-target="#camera-test-result">Test</button>
